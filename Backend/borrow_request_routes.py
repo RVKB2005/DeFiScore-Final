@@ -430,6 +430,19 @@ async def generate_proof_for_borrower(
         )
         from db_models import FeatureData
         
+        # Helper function for score band
+        def _get_score_band(score: float) -> str:
+            if score >= 750:
+                return "excellent"
+            elif score >= 650:
+                return "good"
+            elif score >= 550:
+                return "fair"
+            elif score >= 450:
+                return "poor"
+            else:
+                return "very_poor"
+        
         # Get feature data from database (use the first network's features for ZK proof)
         feature_data = db.query(FeatureData).filter(
             FeatureData.wallet_address == borrower_addr_lower
@@ -461,44 +474,54 @@ async def generate_proof_for_borrower(
             feature_version=features_dict.get("feature_version", "1.0.0")
         )
         
-        # Get credit score from database
-        score_db = db.query(CreditScore).filter(
-            CreditScore.wallet_address == borrower_addr_lower
-        ).order_by(CreditScore.calculated_at.desc()).first()
+        logger.info(f"✓ Reconstructed FeatureVector from database")
         
-        if not score_db:
-            logger.error(f"❌ No credit score found in database for {borrower_addr_lower}")
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="No credit score found in database"
-            )
+        # Compute scores using circuit-compatible engine
+        # This ensures backend scores match circuit recomputation EXACTLY
+        from circuit_score_engine import circuit_score_engine
         
-        # Reconstruct CreditScoreResult
-        breakdown_dict = json.loads(score_db.score_breakdown)
+        # DEBUG: Log key feature values
+        logger.info(f"=== DEBUG: Key Feature Values ===")
+        logger.info(f"  borrowCount: {features.protocol.borrow_count}")
+        logger.info(f"  repayCount: {features.protocol.repay_count}")
+        logger.info(f"  repayToBorrowRatio: {features.protocol.repay_to_borrow_ratio}")
+        logger.info(f"  liquidationCount: {features.protocol.liquidation_count}")
+        logger.info(f"  currentBalance: {features.financial.current_balance_eth}")
+        logger.info(f"  balanceVolatility: {features.financial.balance_volatility}")
+        logger.info(f"  walletAgeDays: {features.temporal.wallet_age_days}")
+        logger.info(f"  totalTransactions: {features.activity.total_transactions}")
+        logger.info(f"================================")
         
-        # Use the actual breakdown from the database
-        # The circuit will recompute these from features and verify they match
-        breakdown = CreditScoreBreakdown(
-            repayment_behavior=breakdown_dict.get('repayment_behavior', 0.0),
-            capital_management=breakdown_dict.get('capital_management', 0.0),
-            wallet_longevity=breakdown_dict.get('wallet_longevity', 0.0),
-            activity_patterns=breakdown_dict.get('activity_patterns', 0.0),
-            protocol_diversity=breakdown_dict.get('protocol_diversity', 0.0),
-            risk_penalties=breakdown_dict.get('risk_penalties', 0.0)
-        )
+        circuit_scores = circuit_score_engine.compute_total_score(features)
         
+        logger.info(f"Circuit-compatible scores computed:")
+        logger.info(f"  Total: {circuit_scores['total_score']} (scaled: {circuit_scores['total_score_scaled']})")
+        logger.info(f"  Repayment: {circuit_scores['repayment_behavior']} (scaled: {circuit_scores['repayment_behavior_scaled']})")
+        logger.info(f"  Capital: {circuit_scores['capital_management']} (scaled: {circuit_scores['capital_management_scaled']})")
+        logger.info(f"  Longevity: {circuit_scores['wallet_longevity']} (scaled: {circuit_scores['wallet_longevity_scaled']})")
+        logger.info(f"  Activity: {circuit_scores['activity_patterns']} (scaled: {circuit_scores['activity_patterns_scaled']})")
+        logger.info(f"  Protocol: {circuit_scores['protocol_diversity']} (scaled: {circuit_scores['protocol_diversity_scaled']})")
+        
+        # Create CreditScoreResult for witness generation
         score_result = CreditScoreResult(
-            credit_score=score_db.score,
-            score_band=breakdown_dict.get('rating', 'unknown').lower(),
-            breakdown=breakdown,
-            raw_score=float(score_db.score),
-            timestamp=score_db.calculated_at,
-            feature_version="1.0.0",
+            credit_score=circuit_scores['total_score'],
+            score_band=_get_score_band(circuit_scores['total_score']),
+            breakdown=CreditScoreBreakdown(
+                repayment_behavior=circuit_scores['repayment_behavior'],
+                capital_management=circuit_scores['capital_management'],
+                wallet_longevity=circuit_scores['wallet_longevity'],
+                activity_patterns=circuit_scores['activity_patterns'],
+                protocol_diversity=circuit_scores['protocol_diversity'],
+                risk_penalties=circuit_scores['risk_penalties']
+            ),
+            raw_score=circuit_scores['total_score'],
+            timestamp=datetime.now(timezone.utc),
+            feature_version=features.feature_version,
             engine_version="1.0.0"
         )
         
-        logger.info(f"✓ Reconstructed FeatureVector and CreditScoreResult from database")
-        
+        # Generate witness using circuit-compatible score computation
+        # This ensures backend scores match circuit recomputation EXACTLY
         witness_result = zk_witness_service.generate_witness(
             features=features,
             score_result=score_result,
@@ -506,7 +529,7 @@ async def generate_proof_for_borrower(
             wallet_address=borrower_addr_lower
         )
         
-        logger.info(f"✓ Witness generated successfully")
+        logger.info(f"✓ Witness generated successfully (circuit-compatible)")
         logger.info(f"Public inputs: {witness_result['public_inputs']}")
         
         # ============================================================================

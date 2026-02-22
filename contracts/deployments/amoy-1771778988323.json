@@ -1,0 +1,15 @@
+{
+  "network": "amoy",
+  "networkName": "Polygon Amoy",
+  "chainId": 80002,
+  "deployer": "0x2C90c1Eca4FF1e81697D912d2665816238C8A3d2",
+  "timestamp": "2026-02-22T16:48:59.776Z",
+  "contracts": {
+    "verifier": "0x21f7868561373aaF5EA72079Ac7D5B1bbaB10127",
+    "registry": "0xc811F42F6CA814D7D18D82392BEd459460d7B765",
+    "securityGuard": "0x725e3a702C4Ebe8878d742C0C2259baD44619a02",
+    "versionManager": "0xAc3314c31844Be18167E0E50732cA57db9F26851",
+    "lendingEscrow": "0x3f27fAD4a2791e8cF3Fb97f711e72a2471323c8E",
+    "lenderIntegration": "0x05865eb66D2cAc416Da044e5734f46ADa28201B3"
+  }
+}

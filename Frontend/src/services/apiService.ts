@@ -82,13 +82,37 @@ class ApiService {
   // CREDIT SCORE ENDPOINTS
   // ============================================================================
 
-  async calculateCreditScore(walletAddress: string, token: string): Promise<any> {
+  async calculateCreditScore(token: string, walletAddress: string): Promise<any> {
     const response = await fetch(`${this.baseUrl}/api/v1/credit-score/calculate`, {
       method: 'POST',
       headers: getAuthHeaders(token),
-      body: JSON.stringify({ wallet_address: walletAddress }),
+      body: JSON.stringify({ wallet_address: walletAddress, networks: ['ethereum'] }),
     });
     if (!response.ok) throw new Error('Failed to calculate credit score');
+    return response.json();
+  }
+
+  async getCreditScore(token: string, walletAddress: string): Promise<any> {
+    const response = await fetch(`${this.baseUrl}/api/v1/credit-score/${walletAddress}`, {
+      headers: getAuthHeaders(token),
+    });
+    if (!response.ok) {
+      const error: any = new Error('Failed to get credit score');
+      error.status = response.status;
+      throw error;
+    }
+    return response.json();
+  }
+
+  async getFeatureData(token: string, walletAddress: string): Promise<any> {
+    const response = await fetch(`${this.baseUrl}/api/v1/features/${walletAddress}`, {
+      headers: getAuthHeaders(token),
+    });
+    if (!response.ok) {
+      const error: any = new Error('Failed to get feature data');
+      error.status = response.status;
+      throw error;
+    }
     return response.json();
   }
 
@@ -431,7 +455,56 @@ class ApiService {
   }
 
   /**
-   * Generate ZK proof for borrower (supplier-initiated)
+   * Generate ZK proof for borrower CLIENT-SIDE (TRUSTLESS)
+   * 
+   * This generates the proof in the browser using Web Worker.
+   * NO backend involvement - this is the trust boundary.
+   * 
+   * @param borrowerAddress - Ethereum address of borrower
+   * @param threshold - Minimum score required by lender
+   * @param features - Feature data from backend (for convenience, not trusted)
+   * @returns Proof and public signals for blockchain submission
+   */
+  async generateZKProofClientSide(
+    borrowerAddress: string,
+    threshold: number,
+    features: any
+  ): Promise<{ proof: any; publicSignals: string[] }> {
+    try {
+      console.log('[API] Generating ZK proof CLIENT-SIDE (trustless)...');
+      
+      // Import the client-side proof service
+      const { zkProofService } = await import('./zkProofService');
+      
+      // Generate proof in browser (5-30 seconds)
+      // This is TRUSTLESS - no backend involvement
+      const result = await zkProofService.generateProof(
+        borrowerAddress,
+        features,
+        threshold
+      );
+      
+      console.log('[API] ✓ ZK proof generated successfully (client-side)');
+      
+      return {
+        proof: result.proof,
+        publicSignals: result.publicSignals
+      };
+      
+    } catch (error: any) {
+      console.error('[API] Failed to generate ZK proof:', error);
+      throw new Error(`Failed to generate ZK proof: ${error.message}`);
+    }
+  }
+
+  /**
+   * Generate ZK proof for borrower (BACKEND - LEGACY)
+   * 
+   * @deprecated Use generateZKProofClientSide instead for trustless operation
+   * 
+   * This method uses backend proof generation which requires trusting the backend.
+   * Kept for backward compatibility and testing only.
+   * 
    * Automatically retries if credit score calculation is in progress (202)
    */
   async generateZKProofForBorrower(
@@ -721,6 +794,21 @@ class ApiService {
 
   /**
    * Liquidate collateral
+   */
+  async getLiquidationInstructions(token: string, loanId: string) {
+    const response = await fetch(`${this.baseUrl}/api/v1/blockchain/lending/liquidate-collateral/${loanId}`, {
+      headers: getAuthHeaders(token)
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to get liquidation instructions: ${response.statusText}`);
+    }
+
+    return response.json();
+  }
+
+  /**
+   * Liquidate collateral (execute)
    */
   async liquidateCollateral(token: string, loanId: string) {
     const response = await fetch(`${this.baseUrl}/api/v1/blockchain/lending/liquidate-collateral/${loanId}`, {

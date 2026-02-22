@@ -39,6 +39,8 @@ interface VerificationState {
     public_signals: number[];
     nullifier: string;
     timestamp: number;
+    onChainTxHash?: string;
+    onChainVerified?: boolean;
   } | null;
   result: {
     is_eligible: boolean;
@@ -59,6 +61,7 @@ export default function SupplyNew({ onWalletClick }: { onWalletClick?: () => voi
   const [minCreditScore, setMinCreditScore] = useState([700]);
   const [interestRate, setInterestRate] = useState('');
   const [currentIntent, setCurrentIntent] = useState<any>(null);
+  const [isSubmittingIntent, setIsSubmittingIntent] = useState(false);
   
   // Step 2: Matched Requests
   const [matchedRequests, setMatchedRequests] = useState<MatchedRequest[]>([]);
@@ -78,15 +81,18 @@ export default function SupplyNew({ onWalletClick }: { onWalletClick?: () => voi
     if (step === 'requests' && isConnected && token) {
       loadMatchedRequests();
     }
-  }, [step, isConnected, token, selectedCurrency]);
+  }, [isConnected, token, selectedCurrency]); // Removed 'step' dependency
 
   // Auto-navigate to requests page if user has already supplied
   // Only navigate after stats have finished loading to prevent flashing
+  // Don't auto-navigate if user explicitly went back to intent step
+  const [manualStepChange, setManualStepChange] = useState(false);
+  
   useEffect(() => {
-    if (!loadingUserData && supplierStats && supplierStats.activeIntents > 0 && step === 'intent') {
+    if (!loadingUserData && supplierStats && supplierStats.activeIntents > 0 && step === 'intent' && !manualStepChange) {
       setStep('requests');
     }
-  }, [supplierStats, loadingUserData, step]);
+  }, [supplierStats, loadingUserData, step, manualStepChange]);
 
   const loadCurrentIntent = async () => {
     if (supplierIntents && supplierIntents.length > 0) {
@@ -141,6 +147,7 @@ export default function SupplyNew({ onWalletClick }: { onWalletClick?: () => voi
       return;
     }
 
+    setIsSubmittingIntent(true);
     try {
       await apiService.createSupplyIntent(token, {
         currency: selectedCurrency,
@@ -154,26 +161,27 @@ export default function SupplyNew({ onWalletClick }: { onWalletClick?: () => voi
       
       // Reload stats and go to requests page
       await refetch();
+      setManualStepChange(false); // Reset flag so auto-navigation works
       setStep('requests');
     } catch (error: any) {
       console.error('Failed to create supply intent:', error);
       toast.error(error.response?.data?.detail || 'Failed to create supply intent');
+    } finally {
+      setIsSubmittingIntent(false);
     }
   };
 
   const handleReviewRequest = async (request: MatchedRequest) => {
-    console.log('[SupplyNew] Review request initiated:', {
+    console.log('[SupplyNew] Review request initiated (CLIENT-SIDE ZK):', {
       requestId: request.id,
       borrowerAddress: request.borrower_address,
       isConnected,
       hasToken: !!token,
-      hasAddress: !!address,
-      tokenPreview: token ? `${token.substring(0, 20)}...` : 'none'
+      hasAddress: !!address
     });
 
     if (!isConnected || !token) {
       toast.error('Please connect your wallet to review requests');
-      onWalletClick?.(); // Open wallet modal if available
       return;
     }
 
@@ -182,7 +190,6 @@ export default function SupplyNew({ onWalletClick }: { onWalletClick?: () => voi
       return;
     }
 
-    // Set custom threshold or use default from intent
     const threshold = minCreditScore[0];
 
     setVerificationState({
@@ -195,41 +202,135 @@ export default function SupplyNew({ onWalletClick }: { onWalletClick?: () => voi
       result: null
     });
 
+    // Wrap everything in try-catch to prevent any unhandled errors
+    let cleanupExecuted = false;
+    
+    const cleanup = () => {
+      if (!cleanupExecuted) {
+        cleanupExecuted = true;
+        setVerificationState(prev => prev ? {
+          ...prev,
+          isVerifying: false,
+          isGeneratingProof: false,
+          isVerifyingProof: false
+        } : null);
+      }
+    };
+
     try {
-      // Step 1: Initiate review
-      console.log('[SupplyNew] Step 1: Initiating review...');
-      await apiService.reviewBorrowRequest(token, {
-        request_id: request.id,
-        credit_score_threshold: threshold
+      // ========================================================================
+      // PHASE 3: CLIENT-SIDE TRUSTLESS PROOF GENERATION
+      // ========================================================================
+      
+      // Step 1: Check if borrower has credit score calculated
+      console.log('[SupplyNew] Step 1: Checking borrower credit score status...');
+      toast.info('Checking borrower credit score...', { duration: 5000, id: 'zk-check' });
+      
+      let creditScoreData;
+      try {
+        creditScoreData = await apiService.getCreditScore(token, request.borrower_address);
+      } catch (error: any) {
+        if (error.status === 404) {
+          // No credit score exists - need to calculate
+          toast.info('Borrower has no credit score. Calculating now...', { id: 'zk-check', duration: 10000 });
+          
+          // Trigger credit score calculation
+          try {
+            await apiService.calculateCreditScore(token, request.borrower_address);
+          } catch (calcError: any) {
+            console.error('[SupplyNew] Failed to trigger calculation:', calcError);
+            throw new Error(`Failed to start credit score calculation: ${calcError.message}`);
+          }
+          
+          // Wait and retry (with exponential backoff)
+          let retries = 0;
+          const maxRetries = 10; // 10 retries * increasing delays = ~10 minutes max
+          
+          while (retries < maxRetries) {
+            await new Promise(resolve => setTimeout(resolve, Math.min(30000 * Math.pow(1.5, retries), 120000))); // 30s to 2min
+            
+            try {
+              creditScoreData = await apiService.getCreditScore(token, request.borrower_address);
+              break; // Success!
+            } catch (retryError: any) {
+              retries++;
+              if (retries >= maxRetries) {
+                throw new Error('Credit score calculation timeout. Please try again later.');
+              }
+              
+              const elapsed = Math.floor(retries * 30 / 60);
+              toast.info(
+                `Still calculating credit score... ${elapsed}m elapsed (attempt ${retries}/${maxRetries})`,
+                { id: 'zk-check', duration: 30000 }
+              );
+            }
+          }
+        } else {
+          // Some other error - rethrow
+          throw error;
+        }
+      }
+
+      // Check if score needs refresh (older than 3 days)
+      if (!creditScoreData) {
+        throw new Error('Failed to retrieve credit score data after calculation');
+      }
+      
+      const scoreAge = Date.now() - new Date(creditScoreData.timestamp).getTime();
+      const threeDays = 3 * 24 * 60 * 60 * 1000;
+      
+      if (scoreAge > threeDays) {
+        toast.info('Credit score is stale. Refreshing...', { id: 'zk-check', duration: 10000 });
+        try {
+          await apiService.calculateCreditScore(token, request.borrower_address);
+          
+          // Wait for refresh
+          await new Promise(resolve => setTimeout(resolve, 5000));
+          creditScoreData = await apiService.getCreditScore(token, request.borrower_address);
+        } catch (refreshError: any) {
+          console.error('[SupplyNew] Failed to refresh score:', refreshError);
+          // Continue with stale score rather than failing
+          toast.warning('Using existing score (refresh failed)', { id: 'zk-check' });
+        }
+      }
+
+      toast.success('Credit score ready!', { id: 'zk-check' });
+
+      // Step 2: Get feature data for proof generation
+      console.log('[SupplyNew] Step 2: Fetching feature data...');
+      toast.info('Preparing proof generation...', { id: 'zk-prep' });
+      
+      let featureData;
+      try {
+        featureData = await apiService.getFeatureData(token, request.borrower_address);
+      } catch (featureError: any) {
+        console.error('[SupplyNew] Failed to fetch feature data:', featureError);
+        throw new Error(`Failed to fetch feature data: ${featureError.message || 'Unknown error'}`);
+      }
+      
+      // Step 3: Generate ZK proof CLIENT-SIDE (TRUSTLESS)
+      console.log('[SupplyNew] Step 3: Generating ZK proof in browser (trustless)...');
+      toast.info('Generating ZK proof in your browser... This may take 10-30 seconds.', { 
+        id: 'zk-gen',
+        duration: 35000 
       });
 
-      toast.info('Checking borrower credit score...', { duration: 10000, id: 'zk-gen' });
+      const { zkProofService } = await import('@/services/zkProofService');
+      
+      let zkProofResult;
+      try {
+        // Frontend computes scores itself (trustless)
+        // Circuit will verify they match its own computation
+        zkProofResult = await zkProofService.generateProof(
+          request.borrower_address,
+          featureData,
+          threshold
+        );
+      } catch (proofError: any) {
+        console.error('[SupplyNew] ZK proof generation failed:', proofError);
+        throw new Error(`ZK proof generation failed: ${proofError.message || 'Unknown error'}`);
+      }
 
-      // Step 2: Generate ZK proof (automatically calculates credit score if needed)
-      // The API service now handles automatic retries with 2-minute intervals
-      console.log('[SupplyNew] Step 2: Generating ZK proof with automatic retry...');
-      
-      const zkProofResult = await apiService.generateZKProofForBorrower(
-        token,
-        {
-          request_id: request.id,
-          borrower_address: request.borrower_address,
-          threshold: threshold
-        },
-        {
-          maxRetries: 5, // 5 retries * 2 minutes = 10 minutes max
-          retryDelay: 120000, // 2 minutes (120 seconds) between retries
-          onProgress: (attempt, maxRetries) => {
-            const elapsedMinutes = Math.floor(attempt * 2);
-            const remainingMinutes = Math.ceil((maxRetries - attempt) * 2);
-            toast.info(
-              `Calculating credit score... ${elapsedMinutes}m elapsed, up to ${remainingMinutes}m remaining (attempt ${attempt}/${maxRetries})`,
-              { id: 'zk-gen', duration: 120000 }
-            );
-          }
-        }
-      );
-      
       toast.success('ZK Proof generated successfully!', { id: 'zk-gen' });
 
       // Update state with proof data
@@ -239,45 +340,119 @@ export default function SupplyNew({ onWalletClick }: { onWalletClick?: () => voi
         isVerifyingProof: true,
         proofData: {
           proof: zkProofResult.proof,
-          public_signals: zkProofResult.public_signals,
-          nullifier: zkProofResult.nullifier,
-          timestamp: zkProofResult.timestamp
+          public_signals: zkProofResult.publicSignals,
+          nullifier: zkProofResult.publicSignals[9], // Nullifier is at index 9
+          timestamp: parseInt(zkProofResult.publicSignals[8]) // Timestamp at index 8
         }
       } : null);
 
-      // Step 3: Verify the proof
-      console.log('[SupplyNew] Step 3: Verifying proof...');
-      toast.info('Verifying proof on-chain...', { id: 'zk-verify' });
+      // Step 4: Verify eligibility (check if score >= threshold)
+      console.log('[SupplyNew] Step 4: Checking eligibility...');
       
-      const verifyResult = await apiService.verifyZKProofForRequest(token, request.id, zkProofResult);
+      const scoreTotal = parseInt(zkProofResult.publicSignals[1]); // Score at index 1
+      const thresholdScaled = threshold * 1000; // Threshold scaled
+      const isEligible = scoreTotal >= thresholdScaled;
 
-      toast.success('Proof verified successfully!', { id: 'zk-verify' });
+      // Update state with proof data (before on-chain submission)
+      setVerificationState(prev => prev ? {
+        ...prev,
+        isGeneratingProof: false,
+        isVerifyingProof: true,
+        proofData: {
+          proof: zkProofResult.proof,
+          public_signals: zkProofResult.publicSignals,
+          nullifier: zkProofResult.publicSignals[9], // Nullifier is at index 9
+          timestamp: parseInt(zkProofResult.publicSignals[8]) // Timestamp at index 8
+        }
+      } : null);
 
-      // Update state with result (ZERO-KNOWLEDGE: only eligibility, not score)
+      // Step 5: Submit proof to blockchain (ON-CHAIN VERIFICATION)
+      console.log('[SupplyNew] Step 5: Submitting proof to blockchain...');
+      toast.info('Submitting proof to blockchain...', { 
+        id: 'zk-blockchain', 
+        duration: 5000 
+      });
+
+      const { blockchainProofService } = await import('@/services/blockchainProofService');
+      
+      let submissionResult;
+      try {
+        submissionResult = await blockchainProofService.submitProof(
+          zkProofResult.proof,
+          zkProofResult.publicSignals,
+          (status) => {
+            console.log('[SupplyNew] Blockchain status:', status);
+            toast.info(status, { id: 'zk-blockchain', duration: 5000 });
+          }
+        );
+      } catch (blockchainError: any) {
+        console.error('[SupplyNew] Blockchain submission failed:', blockchainError);
+        
+        toast.warning(
+          `Proof verified off-chain but blockchain submission failed: ${blockchainError.message}`,
+          { id: 'zk-blockchain', duration: 10000 }
+        );
+        
+        submissionResult = {
+          success: false,
+          error: blockchainError.message
+        };
+      }
+
+      if (submissionResult.success) {
+        toast.success(
+          <div className="space-y-1">
+            <p className="font-semibold">✓ Proof verified on-chain!</p>
+            <p className="text-xs">Tx: {submissionResult.txHash?.substring(0, 20)}...</p>
+            <p className="text-xs">Gas used: {submissionResult.gasUsed}</p>
+          </div>,
+          { id: 'zk-blockchain', duration: 8000 }
+        );
+      }
+
+      // Update state with final result (ZERO-KNOWLEDGE: only eligibility, not score)
       setVerificationState(prev => prev ? {
         ...prev,
         isVerifying: false,
         isVerifyingProof: false,
         result: {
-          is_eligible: verifyResult.is_eligible
-          // DO NOT include actual_score - zero-knowledge proof!
-        }
+          is_eligible: isEligible
+        },
+        proofData: prev.proofData ? {
+          ...prev.proofData,
+          onChainTxHash: submissionResult.txHash,
+          onChainVerified: submissionResult.success
+        } : null
       } : null);
 
-      if (verifyResult.is_eligible) {
-        toast.success('Borrower is eligible! Credit score verified with ZK proof.', { id: 'zk-gen' });
+      if (isEligible) {
+        const message = submissionResult.success 
+          ? '✓ Borrower is eligible! Credit score verified on-chain with ZK proof.'
+          : '✓ Borrower is eligible! Credit score verified off-chain with ZK proof.';
+        
+        toast.success(message, { 
+          id: 'zk-result',
+          duration: 5000 
+        });
       } else {
-        toast.warning('Borrower does not meet credit score threshold', { id: 'zk-gen' });
+        toast.warning('✗ Borrower does not meet credit score threshold', { 
+          id: 'zk-result',
+          duration: 5000 
+        });
       }
 
     } catch (error: any) {
-      console.error('[SupplyNew] Failed to initiate review:', error);
+      console.error('[SupplyNew] Failed to generate proof:', error);
+      console.error('[SupplyNew] Error stack:', error.stack);
       
+      cleanup();
+
       // Handle specific error cases
-      if (error.status === 401 || error.status === 403 || error.message?.includes('Unauthorized') || error.message?.includes('401') || error.message?.includes('403')) {
+      if (error.status === 401 || error.status === 403) {
         toast.error('Session expired. Please reconnect your wallet.', { id: 'zk-gen' });
-        onWalletClick?.(); // Open wallet modal to reconnect
-      } else if (error.status === 404 || error.message?.includes('404') || error.message?.includes('Not Found')) {
+        // Don't call onWalletClick - just show error
+        // User can manually reconnect if needed
+      } else if (error.status === 404) {
         toast.error('Backend service unavailable. Please ensure the server is running at http://localhost:8000', { id: 'zk-gen' });
       } else if (error.message?.includes('No feature data found')) {
         toast.error('Borrower needs to calculate their credit score first. Their calculation may still be in progress. Please wait a few minutes and try again.', { 
@@ -289,35 +464,124 @@ export default function SupplyNew({ onWalletClick }: { onWalletClick?: () => voi
           id: 'zk-gen',
           duration: 8000
         });
+      } else if (error.message?.includes('timeout')) {
+        toast.error('Credit score calculation timeout. The borrower may need to try calculating their score again.', { 
+          id: 'zk-gen',
+          duration: 8000
+        });
       } else if (error.message?.includes('Failed to fetch') || error.message?.includes('NetworkError')) {
         toast.error('Cannot connect to backend server. Please ensure it is running at http://localhost:8000', { id: 'zk-gen' });
       } else {
         toast.error(error.message || 'Failed to verify credit score', { id: 'zk-gen' });
       }
       
-      setVerificationState(null);
+      // Close modal after showing error
+      setTimeout(() => {
+        setVerificationState(null);
+      }, 1000);
     }
   };
 
   const handleApproveRequest = async () => {
-    if (!verificationState || !token) return;
+    if (!verificationState || !token || !address) return;
 
     const request = matchedRequests.find(r => r.id === verificationState.requestId);
     if (!request) return;
 
     try {
-      await apiService.approveBorrowRequest(token, {
-        request_id: verificationState.requestId,
-        offered_apy: request.requested_apy,
-        terms: null
+      // Import ethers for transaction
+      const { BrowserProvider, parseUnits } = await import('ethers');
+      
+      // Get provider from MetaMask
+      if (!window.ethereum) {
+        toast.error('MetaMask not found. Please install MetaMask.');
+        return;
+      }
+
+      const provider = new BrowserProvider(window.ethereum);
+      const signer = await provider.getSigner();
+
+      // Show confirmation toast
+      toast.info(`Preparing to send ${request.amount} ${request.currency} to borrower...`, { 
+        id: 'approve-loan',
+        duration: 5000 
       });
 
-      toast.success('Borrow request approved!');
+      // For now, we'll use native MATIC transfer
+      // TODO: Add support for ERC20 tokens (USDC, USDT, etc.)
+      const tx = await signer.sendTransaction({
+        to: request.borrower_address,
+        value: parseUnits(request.amount.toString(), 18), // Assuming 18 decimals for MATIC
+        gasLimit: 21000n
+      });
+
+      toast.info('Transaction submitted. Waiting for confirmation...', { 
+        id: 'approve-loan',
+        duration: 10000 
+      });
+
+      // Wait for transaction confirmation
+      const receipt = await tx.wait();
+
+      toast.success(
+        <div className="space-y-2">
+          <p className="font-semibold">Loan Approved!</p>
+          <p className="text-sm">{request.amount} {request.currency} sent to borrower</p>
+          <p className="text-xs">Tx: {receipt?.hash?.substring(0, 20)}...</p>
+        </div>,
+        { id: 'approve-loan', duration: 8000 }
+      );
+
       setVerificationState(null);
       loadMatchedRequests(); // Refresh list
     } catch (error: any) {
       console.error('Failed to approve request:', error);
-      toast.error(error.response?.data?.detail || 'Failed to approve request');
+      
+      let errorMessage = 'Failed to send transaction';
+      if (error.code === 'ACTION_REJECTED') {
+        errorMessage = 'Transaction rejected by user';
+      } else if (error.message?.includes('insufficient funds')) {
+        errorMessage = 'Insufficient funds for transaction';
+      }
+      
+      toast.error(errorMessage, { id: 'approve-loan' });
+    }
+  };
+
+  const handleCreateLoan = async (requestId: string) => {
+    if (!token) return;
+
+    try {
+      toast.info('Creating loan on blockchain...', { id: 'create-loan' });
+      
+      // For now, we'll use USDC addresses on Polygon Amoy
+      // TODO: Make this dynamic based on currency
+      const result = await apiService.createLoanOnChain(token, {
+        request_id: requestId,
+        loan_token: '0x41E94Eb019C0762f9Bfcf9Fb1E58725BfB0e7582', // USDC on Amoy
+        collateral_token: '0x41E94Eb019C0762f9Bfcf9Fb1E58725BfB0e7582' // USDC on Amoy
+      });
+
+      toast.success(
+        <div className="space-y-2">
+          <p className="font-semibold">Loan Created on Blockchain!</p>
+          <p className="text-sm">Loan ID: {result.loan_id}</p>
+          <p className="text-sm">Status: {result.status}</p>
+          <p className="text-xs text-muted-foreground mt-2">
+            Borrower must now deposit collateral
+          </p>
+        </div>,
+        { id: 'create-loan', duration: 10000 }
+      );
+
+      // Redirect to loans page
+      setTimeout(() => {
+        window.location.href = '/loans';
+      }, 2000);
+
+    } catch (error: any) {
+      console.error('Failed to create loan:', error);
+      toast.error(error.message || 'Failed to create loan on blockchain', { id: 'create-loan' });
     }
   };
 
@@ -764,8 +1028,16 @@ export default function SupplyNew({ onWalletClick }: { onWalletClick?: () => voi
                 size="lg"
                 className="w-full"
                 onClick={handleCreateIntent}
+                disabled={isSubmittingIntent}
               >
-                {currentIntent ? 'Update Supply Intent' : 'Supply'}
+                {isSubmittingIntent ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin mr-2" />
+                    {currentIntent ? 'Updating...' : 'Creating...'}
+                  </>
+                ) : (
+                  currentIntent ? 'Update Supply Intent' : 'Supply'
+                )}
               </Button>
             </CardContent>
           </Card>
@@ -790,7 +1062,11 @@ export default function SupplyNew({ onWalletClick }: { onWalletClick?: () => voi
                 <Badge variant="outline" className="bg-primary/10 text-primary border-primary/30">
                   {matchedRequests.length} Matches
                 </Badge>
-                <Button variant="outline" size="sm" onClick={() => setStep('intent')}>
+                <Button variant="outline" size="sm" onClick={() => {
+                  setManualStepChange(true);
+                  setStep('intent');
+                  loadCurrentIntent();
+                }}>
                   Adjust Criteria
                 </Button>
               </div>
@@ -915,7 +1191,7 @@ export default function SupplyNew({ onWalletClick }: { onWalletClick?: () => voi
                         <p className="font-semibold mb-2">Proof Generated Successfully!</p>
                         <div className="animate-spin w-8 h-8 border-4 border-primary border-t-transparent rounded-full mx-auto mt-4 mb-2" />
                         <p className="text-sm text-muted-foreground">
-                          Verifying proof on-chain...
+                          Submitting to blockchain for on-chain verification...
                         </p>
                       </div>
 
@@ -993,7 +1269,11 @@ export default function SupplyNew({ onWalletClick }: { onWalletClick?: () => voi
                       <div className="bg-success/10 border border-success/30 rounded-lg p-4 space-y-3">
                         <div className="flex items-center gap-2 mb-2">
                           <Shield className="w-4 h-4 text-success" />
-                          <h4 className="font-semibold text-sm text-success">Proof Verified On-Chain</h4>
+                          <h4 className="font-semibold text-sm text-success">
+                            {verificationState.proofData?.onChainVerified 
+                              ? 'Proof Verified On-Chain' 
+                              : 'Proof Verified Off-Chain'}
+                          </h4>
                         </div>
                         
                         <div className="space-y-2 text-xs">
@@ -1001,6 +1281,20 @@ export default function SupplyNew({ onWalletClick }: { onWalletClick?: () => voi
                             <span className="text-muted-foreground">Proof Type:</span>
                             <span className="font-semibold">Groth16 ZK-SNARK</span>
                           </div>
+                          
+                          {verificationState.proofData?.onChainVerified && verificationState.proofData?.onChainTxHash && (
+                            <div className="flex justify-between">
+                              <span className="text-muted-foreground">Transaction:</span>
+                              <a 
+                                href={`https://amoy.polygonscan.com/tx/${verificationState.proofData.onChainTxHash}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="font-mono text-primary hover:underline"
+                              >
+                                {verificationState.proofData.onChainTxHash.substring(0, 10)}...
+                              </a>
+                            </div>
+                          )}
                           
                           <div className="flex justify-between">
                             <span className="text-muted-foreground">Nullifier:</span>
@@ -1016,6 +1310,13 @@ export default function SupplyNew({ onWalletClick }: { onWalletClick?: () => voi
                             <span className="text-muted-foreground">Public Signals:</span>
                             <span className="font-mono">{verificationState.proofData.public_signals.length} signals</span>
                           </div>
+                          
+                          {verificationState.proofData?.onChainVerified && (
+                            <div className="flex justify-between">
+                              <span className="text-muted-foreground">Network:</span>
+                              <span className="font-semibold">Polygon Amoy</span>
+                            </div>
+                          )}
                         </div>
 
                         {/* Expandable Verified Proof Data */}

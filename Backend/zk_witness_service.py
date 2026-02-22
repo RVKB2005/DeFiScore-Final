@@ -1,12 +1,14 @@
 """
 ZK Witness Service
 Formats feature vectors into circuit-compatible witness data
+Uses circuit-compatible score computation to ensure exact match
 """
 from typing import Dict, Any, Optional
 from datetime import datetime, timezone
 import logging
 from feature_extraction_models import FeatureVector
 from credit_score_models import CreditScoreResult
+from circuit_score_engine import circuit_score_engine
 import hashlib
 import json
 
@@ -56,44 +58,35 @@ class ZKWitnessService:
             # Convert address to field element (remove 0x prefix)
             user_address_field = int(wallet_address, 16) if wallet_address.startswith('0x') else int(wallet_address, 16)
             
-            # Scale scores (already in 0-900 range, scale to 0-900000)
-            score_total_scaled = int(score_result.credit_score * self.SCALE_FACTOR)
-            score_repayment_scaled = int(score_result.breakdown.repayment_behavior * self.SCALE_FACTOR)
-            score_capital_scaled = int(score_result.breakdown.capital_management * self.SCALE_FACTOR)
-            score_longevity_scaled = int(score_result.breakdown.wallet_longevity * self.SCALE_FACTOR)
-            score_activity_scaled = int(score_result.breakdown.activity_patterns * self.SCALE_FACTOR)
-            score_protocol_scaled = int(score_result.breakdown.protocol_diversity * self.SCALE_FACTOR)
+            # Use pre-scaled scores from circuit engine to avoid rounding errors
+            # The circuit engine computes everything in integer arithmetic (scaled x1000)
+            # We need to recompute to get the scaled versions
+            from circuit_score_engine import circuit_score_engine
+            circuit_scores = circuit_score_engine.compute_total_score(features)
+            
+            # Use the scaled versions directly (these are integers)
+            score_total_scaled = int(circuit_scores['total_score_scaled'])
+            score_repayment_scaled = int(circuit_scores['repayment_behavior_scaled'])
+            score_capital_scaled = int(circuit_scores['capital_management_scaled'])
+            score_longevity_scaled = int(circuit_scores['wallet_longevity_scaled'])
+            score_activity_scaled = int(circuit_scores['activity_patterns_scaled'])
+            score_protocol_scaled = int(circuit_scores['protocol_diversity_scaled'])
             threshold_scaled = int(threshold * self.SCALE_FACTOR)
             
             # Generate nullifier (will be recomputed in circuit)
-            nullifier_hex = self._compute_nullifier(user_address_field, nonce, timestamp, self.VERSION_ID)
+            nullifier_int = self._compute_nullifier(user_address_field, nonce, timestamp, self.VERSION_ID)
             
-            # Convert nullifier from hex to decimal for circuit input
-            logger.info(f"Nullifier hex: {nullifier_hex}")
-            logger.info(f"Nullifier hex type: {type(nullifier_hex)}")
+            # Validate nullifier is within field bounds
+            # BN254 field modulus
+            BN254_FIELD_MODULUS = 21888242871839275222246405745257275088548364400416034343698204186575808495617
             
-            try:
-                # Ensure we're working with a string
-                nullifier_hex_str = str(nullifier_hex)
-                
-                # Remove 0x prefix if present
-                if nullifier_hex_str.startswith('0x'):
-                    nullifier_hex_str = nullifier_hex_str[2:]
-                
-                # Convert hex to decimal integer
-                nullifier_decimal = int(nullifier_hex_str, 16)
-                
-                logger.info(f"Nullifier decimal: {nullifier_decimal}")
-                logger.info(f"Nullifier decimal type: {type(nullifier_decimal)}")
-                
-                # Verify it's actually an integer
-                if not isinstance(nullifier_decimal, int):
-                    raise ValueError(f"Nullifier decimal is not an integer: {type(nullifier_decimal)}")
-                    
-            except ValueError as e:
-                logger.error(f"Failed to convert nullifier hex to decimal: {e}")
-                logger.error(f"Nullifier hex value: {nullifier_hex}")
-                raise ValueError(f"Invalid nullifier hex format: {nullifier_hex}")
+            if nullifier_int >= BN254_FIELD_MODULUS:
+                logger.warning(f"Nullifier too large ({nullifier_int}), reducing to fit BN254 field")
+                nullifier_int = nullifier_int % BN254_FIELD_MODULUS
+            
+            logger.info(f"Nullifier: {nullifier_int}")
+            logger.info(f"Nullifier type: {type(nullifier_int)}")
+            logger.info(f"Nullifier fits in BN254 field: {nullifier_int < BN254_FIELD_MODULUS}")
             
             public_inputs = {
                 "userAddress": str(user_address_field),
@@ -105,7 +98,7 @@ class ZKWitnessService:
                 "scoreProtocol": int(score_protocol_scaled),
                 "threshold": int(threshold_scaled),
                 "timestamp": int(timestamp),
-                "nullifier": int(nullifier_decimal),  # Use integer directly, not string
+                "nullifier": int(nullifier_int),  # Use integer directly, not string
                 "versionId": int(self.VERSION_ID)
             }
             
@@ -116,6 +109,17 @@ class ZKWitnessService:
             logger.info(f"  nullifier: {public_inputs['nullifier']} (type: {type(public_inputs['nullifier'])})")
             
             private_inputs = self._format_private_inputs(features, nonce)
+            
+            # DEBUG: Log key private inputs
+            logger.info(f"=== DEBUG: Private Inputs ===")
+            logger.info(f"  borrowCount: {private_inputs['borrowCount']}")
+            logger.info(f"  repayCount: {private_inputs['repayCount']}")
+            logger.info(f"  repayToBorrowRatio: {private_inputs['repayToBorrowRatio']}")
+            logger.info(f"  liquidationCount: {private_inputs['liquidationCount']}")
+            logger.info(f"  currentBalanceScaled: {private_inputs['currentBalanceScaled']}")
+            logger.info(f"  balanceVolatilityScaled: {private_inputs['balanceVolatilityScaled']}")
+            logger.info(f"  nonce: {private_inputs['nonce']}")
+            logger.info(f"================================")
             
             witness = {
                 "version_id": self.VERSION_ID,
@@ -143,51 +147,72 @@ class ZKWitnessService:
     def _format_private_inputs(self, features: FeatureVector, nonce: int) -> Dict[str, int]:
         """
         Format feature vector into circuit-compatible private inputs
-        All floats scaled by 1000, integers kept as-is
+        
+        CRITICAL: The circuit's LogScale template expects UNSCALED values for balances!
+        - For balances (ETH values): pass as integers (e.g., 5 for 5.42 ETH)
+        - For ratios/percentages: scale by 1000 (e.g., 667 for 0.667)
+        - For counts: pass as-is (e.g., 8 for 8 borrows)
+        
         All values must be integers for circuit compatibility
+        All values must be non-negative and fit in BN254 field
         """
+        # BN254 field modulus
+        BN254_FIELD_MODULUS = 21888242871839275222246405745257275088548364400416034343698204186575808495617
+        
+        def safe_int(value: float) -> int:
+            """Convert to int and ensure it fits in BN254 field"""
+            result = int(value)
+            if result < 0:
+                result = 0  # Clamp negative values to 0
+            if result >= BN254_FIELD_MODULUS:
+                result = result % BN254_FIELD_MODULUS
+            return result
+        
+        # CRITICAL FIX: Pass UNSCALED balance values to circuit
+        # The circuit's LogScale computes log(value + 1), so it expects actual ETH amounts
+        # For example: 5.42 ETH should be passed as 5 (integer part)
         return {
-            # Financial Features (7)
-            "currentBalanceScaled": int(self._scale(features.financial.current_balance_eth)),
-            "maxBalanceScaled": int(self._scale(features.financial.max_balance_eth)),
-            "balanceVolatilityScaled": int(self._scale(features.financial.balance_volatility)),
-            "suddenDropsCount": int(features.financial.sudden_drops_count),
-            "totalValueTransferred": int(self._scale(features.financial.total_value_transferred_eth)),
-            "avgTxValue": int(self._scale(features.financial.average_transaction_value_eth)),
-            "minBalanceScaled": int(self._scale(features.financial.min_balance_eth)),
+            # Financial Features (7) - UNSCALED for balances
+            "currentBalanceScaled": safe_int(features.financial.current_balance_eth),  # UNSCALED
+            "maxBalanceScaled": safe_int(features.financial.max_balance_eth),  # UNSCALED
+            "balanceVolatilityScaled": safe_int(self._scale(features.financial.balance_volatility)),  # SCALED (ratio)
+            "suddenDropsCount": safe_int(features.financial.sudden_drops_count),
+            "totalValueTransferred": safe_int(features.financial.total_value_transferred_eth),  # UNSCALED
+            "avgTxValue": safe_int(features.financial.average_transaction_value_eth),  # UNSCALED
+            "minBalanceScaled": safe_int(features.financial.min_balance_eth),  # UNSCALED
             
             # Protocol Features (8)
-            "borrowCount": int(features.protocol.borrow_count),
-            "repayCount": int(features.protocol.repay_count),
-            "repayToBorrowRatio": int(self._scale(features.protocol.repay_to_borrow_ratio)),
-            "liquidationCount": int(features.protocol.liquidation_count),
-            "totalProtocolEvents": int(features.protocol.total_protocol_events),
-            "depositCount": int(features.protocol.deposit_count),
-            "withdrawCount": int(features.protocol.withdraw_count),
-            "avgBorrowDuration": int(self._scale(features.protocol.average_borrow_duration_days)),
+            "borrowCount": safe_int(features.protocol.borrow_count),
+            "repayCount": safe_int(features.protocol.repay_count),
+            "repayToBorrowRatio": safe_int(self._scale(features.protocol.repay_to_borrow_ratio)),  # SCALED (ratio)
+            "liquidationCount": safe_int(features.protocol.liquidation_count),
+            "totalProtocolEvents": safe_int(features.protocol.total_protocol_events),
+            "depositCount": safe_int(features.protocol.deposit_count),
+            "withdrawCount": safe_int(features.protocol.withdraw_count),
+            "avgBorrowDuration": safe_int(features.protocol.average_borrow_duration_days),
             
             # Activity Features (6)
-            "totalTransactions": int(features.activity.total_transactions),
-            "activeDays": int(features.activity.active_days),
-            "totalDays": int(features.activity.total_days),
-            "activeDaysRatio": int(self._scale(features.activity.active_days_ratio)),
-            "longestInactivityGap": int(features.activity.longest_inactivity_gap_days),
-            "transactionsPerDay": int(self._scale(features.activity.transactions_per_day)),
+            "totalTransactions": safe_int(features.activity.total_transactions),
+            "activeDays": safe_int(features.activity.active_days),
+            "totalDays": safe_int(features.activity.total_days),
+            "activeDaysRatio": safe_int(self._scale(features.activity.active_days_ratio)),  # SCALED (ratio)
+            "longestInactivityGap": safe_int(features.activity.longest_inactivity_gap_days),
+            "transactionsPerDay": safe_int(self._scale(features.activity.transactions_per_day)),  # SCALED (ratio)
             
             # Temporal Features (4)
-            "walletAgeDays": int(features.temporal.wallet_age_days),
-            "transactionRegularity": int(self._scale(features.temporal.transaction_regularity_score)),
-            "burstActivityRatio": int(self._scale(features.temporal.burst_activity_ratio)),
-            "daysSinceLastActivity": int(features.temporal.days_since_last_activity),
+            "walletAgeDays": safe_int(features.temporal.wallet_age_days),
+            "transactionRegularity": safe_int(self._scale(features.temporal.transaction_regularity_score)),  # SCALED (ratio)
+            "burstActivityRatio": safe_int(self._scale(features.temporal.burst_activity_ratio)),  # SCALED (ratio)
+            "daysSinceLastActivity": safe_int(features.temporal.days_since_last_activity),
             
             # Risk Features (4)
-            "failedTxCount": int(features.risk.failed_transaction_count),
-            "failedTxRatio": int(self._scale(features.risk.failed_transaction_ratio)),
-            "highGasSpikeCount": int(features.risk.high_gas_spike_count),
-            "zeroBalancePeriods": int(features.risk.zero_balance_periods),
+            "failedTxCount": safe_int(features.risk.failed_transaction_count),
+            "failedTxRatio": safe_int(self._scale(features.risk.failed_transaction_ratio)),  # SCALED (ratio)
+            "highGasSpikeCount": safe_int(features.risk.high_gas_spike_count),
+            "zeroBalancePeriods": safe_int(features.risk.zero_balance_periods),
             
             # Anti-Replay (1)
-            "nonce": int(nonce)
+            "nonce": safe_int(nonce)
         }
     
     def _scale(self, value: float) -> int:
@@ -198,23 +223,37 @@ class ZKWitnessService:
         """
         Generate unique nonce for nullifier
         Uses hash of address + timestamp + random component
+        
+        Returns a positive integer that fits in the BN254 field
+        BN254 field modulus: 21888242871839275222246405745257275088548364400416034343698204186575808495617
+        
+        TEMPORARY: Using smaller nonce values to debug circuit issue
         """
         import secrets
-        random_bytes = secrets.token_bytes(32)
+        
+        # TEMPORARY: Use a much smaller nonce to test if size is the issue
+        # Generate a random 128-bit number instead of 256-bit
+        random_bytes = secrets.token_bytes(16)  # 16 bytes = 128 bits
         data = f"{wallet_address}{timestamp}{random_bytes.hex()}".encode()
         hash_digest = hashlib.sha256(data).digest()
-        # Convert to integer (take first 31 bytes to fit in field)
-        nonce = int.from_bytes(hash_digest[:31], byteorder='big')
+        
+        # Take only first 16 bytes (128 bits) to keep nonce smaller
+        nonce = int.from_bytes(hash_digest[:16], byteorder='big')
+        
+        # Ensure nonce is positive and non-zero
+        if nonce <= 0:
+            nonce = 1
+        
+        logger.info(f"Generated nonce: {nonce}")
+        logger.info(f"Nonce bit length: {nonce.bit_length()} bits")
         return nonce
     
-    def _compute_nullifier(self, user_address: int, nonce: int, timestamp: int, version_id: int) -> str:
+    def _compute_nullifier(self, user_address: int, nonce: int, timestamp: int, version_id: int) -> int:
         """
-        Compute nullifier hash using Poseidon (PRODUCTION)
+        Compute nullifier hash using SHA256 (TEMPORARY - circuit will recompute with Poseidon)
         
-        This matches the circuit's nullifier computation exactly:
-        nullifier = Poseidon(userAddress, nonce, timestamp, versionId)
-        
-        Uses poseidon-hash library for Python implementation
+        The circuit recomputes the nullifier using Poseidon internally.
+        This backend nullifier is just for tracking/logging purposes.
         
         Args:
             user_address: User address as field element
@@ -223,30 +262,28 @@ class ZKWitnessService:
             version_id: Circuit version
             
         Returns:
-            Nullifier hash as hex string
+            Nullifier hash as integer (within BN254 field)
         """
         try:
-            # Try to use poseidon-hash library (production)
-            from poseidon_hash import poseidon_hash
+            # BN254 field modulus
+            BN254_FIELD_MODULUS = 21888242871839275222246405745257275088548364400416034343698204186575808495617
             
-            # Poseidon hash with 4 inputs (matches circuit)
-            inputs = [user_address, nonce, timestamp, version_id]
-            nullifier_int = poseidon_hash(inputs)
-            
-            # Convert to hex string
-            nullifier_hex = hex(nullifier_int)
-            return nullifier_hex
-            
-        except ImportError:
-            # Fallback to SHA256 if poseidon-hash not installed
-            logger.warning("poseidon-hash library not installed. Using SHA256 fallback.")
-            logger.warning("Install: pip install poseidon-hash")
-            logger.warning("Note: This nullifier won't match circuit output!")
-            
-            # SHA256 fallback (for development only)
+            # Use SHA256 for backend nullifier (circuit will use Poseidon)
             data = f"{user_address}{nonce}{timestamp}{version_id}".encode()
-            hash_digest = hashlib.sha256(data).hexdigest()
-            return hash_digest
+            hash_digest = hashlib.sha256(data).digest()
+            # Convert to integer
+            nullifier_int = int.from_bytes(hash_digest, byteorder='big')
+            
+            # Reduce modulo BN254 field
+            nullifier_int = nullifier_int % BN254_FIELD_MODULUS
+            
+            logger.info(f"Generated SHA256 nullifier (circuit will use Poseidon): {nullifier_int}")
+            logger.info(f"Nullifier fits in BN254 field: {nullifier_int < BN254_FIELD_MODULUS}")
+            return nullifier_int
+            
+        except Exception as e:
+            logger.error(f"Nullifier generation failed: {e}")
+            raise RuntimeError(f"Nullifier generation failed: {e}")
     
     def validate_witness(self, witness: Dict[str, Any]) -> bool:
         """

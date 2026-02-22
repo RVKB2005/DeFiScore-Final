@@ -16,7 +16,7 @@ import Borrow from "./pages/Borrow";
 import BorrowHistory from "./pages/BorrowHistory";
 import PreviousRequests from "./pages/PreviousRequests";
 import LoanOffers from "./pages/LoanOffers";
-import Loans from "./pages/Loans";
+import LoansPage from "./pages/LoansPage";
 import CreditScore from "./pages/CreditScore";
 import UserDashboard from "./pages/UserDashboard";
 import ManageSupply from "./pages/ManageSupply";
@@ -47,7 +47,7 @@ const App = () => {
                     <Route path="/borrow/previous-requests" element={<PreviousRequests />} />
                     <Route path="/borrow/history" element={<BorrowHistory />} />
                     <Route path="/borrow/offer" element={<LoanOffers />} />
-                    <Route path="/loans" element={<Loans />} />
+                    <Route path="/loans" element={<LoansPage onWalletClick={() => setWalletModalOpen(true)} />} />
                     <Route path="/score" element={<CreditScore />} />
                     <Route path="/user" element={<UserDashboard onWalletClick={() => setWalletModalOpen(true)} />} />
                     <Route path="/manage-supply" element={<ManageSupply />} />

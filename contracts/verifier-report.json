@@ -1,12 +1,12 @@
 {
-  "timestamp": "2026-02-22T08:37:49.737Z",
+  "timestamp": "2026-02-22T17:53:39.053Z",
   "circuit": "DeFiCreditScore",
   "version": "1.0.0",
   "verifier": {
     "contract_name": "DeFiScoreVerifier",
     "file": "Verifier.sol",
     "lines_of_code": 239,
-    "size_bytes": 10955,
+    "size_bytes": 10954,
     "size_kb": "10.70",
     "estimated_gas": 273900
   },

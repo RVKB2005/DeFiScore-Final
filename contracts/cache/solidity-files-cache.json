@@ -40,8 +40,8 @@
       ]
     },
     "D:\\DeFiScore\\contracts\\contracts\\DeFiScoreRegistry.sol": {
-      "lastModificationDate": 1771753061970,
-      "contentHash": "958b003a64c3be884760dec4a8cc8535",
+      "lastModificationDate": 1771778258701,
+      "contentHash": "89da6d4c217fea7ce40cd5cf9800aa06",
       "sourceName": "contracts/DeFiScoreRegistry.sol",
       "solcConfig": {
         "version": "0.8.20",
@@ -153,8 +153,8 @@
       ]
     },
     "D:\\DeFiScore\\contracts\\contracts\\Verifier.sol": {
-      "lastModificationDate": 1771753061978,
-      "contentHash": "858a94c5a2c54d1fb28690c4ecaa0a84",
+      "lastModificationDate": 1771782819038,
+      "contentHash": "a9e56bc9ef730a0c86bb1ad646afe46e",
       "sourceName": "contracts/Verifier.sol",
       "solcConfig": {
         "version": "0.8.20",

@@ -153,6 +153,8 @@ contract DeFiScoreRegistry {
      *   [8] timestamp
      *   [9] nullifier
      *   [10] versionId
+     * 
+     * NOTE: Anyone can submit a proof for any user (proof itself proves authenticity)
      */
     function submitProof(
         uint[8] calldata _proof,
@@ -165,13 +167,10 @@ contract DeFiScoreRegistry {
         bytes32 nullifier = bytes32(_pubSignals[9]);
         uint256 version = _pubSignals[10];
         
-        // Validation 1: User must match sender
-        if (user != msg.sender) revert Unauthorized();
-        
-        // Validation 2: Check nullifier not used
+        // Validation 1: Check nullifier not used
         if (usedNullifiers[nullifier]) revert NullifierAlreadyUsed();
         
-        // Validation 3: Check timestamp validity
+        // Validation 2: Check timestamp validity
         if (timestamp > block.timestamp + MAX_TIMESTAMP_DRIFT) {
             revert InvalidTimestamp();
         }
@@ -179,11 +178,11 @@ contract DeFiScoreRegistry {
             revert ProofExpired();
         }
         
-        // Validation 4: Check version exists
+        // Validation 3: Check version exists
         address verifier = verifiers[version];
         if (verifier == address(0)) revert InvalidVersion();
         
-        // Validation 5: Verify proof
+        // Validation 4: Verify proof
         bool isValid = IVerifier(verifier).verifyProof(
             [_proof[0], _proof[1]],
             [[_proof[2], _proof[3]], [_proof[4], _proof[5]]],

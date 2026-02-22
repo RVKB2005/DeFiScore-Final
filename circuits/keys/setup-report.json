@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-02-22T11:37:40.743Z",
+  "timestamp": "2026-02-22T17:53:31.407Z",
   "circuit": "DeFiCreditScore",
   "version": "1.0.0",
   "ceremony": {
@@ -21,7 +21,7 @@
     "powers_of_tau": "powersOfTau28_hez_final_16.ptau"
   },
   "sizes": {
-    "proving_key_mb": "0.67",
+    "proving_key_mb": "0.77",
     "verification_key_kb": "4.64",
     "powers_of_tau_mb": "72.08"
   },

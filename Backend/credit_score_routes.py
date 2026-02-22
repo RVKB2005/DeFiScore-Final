@@ -160,6 +160,53 @@ async def get_my_score(
     }
 
 
+@router.get("/{wallet_address}")
+async def get_credit_score_by_address(
+    wallet_address: str,
+    current_wallet: str = Depends(get_current_wallet)
+) -> Dict[str, Any]:
+    """
+    Get credit score for any wallet address
+    
+    SECURITY:
+    - Requires JWT authentication
+    - Can query any wallet's score (public data for lending)
+    - Returns 404 if no cached score exists
+    
+    Use this for:
+    - Lenders checking borrower scores
+    - Public score verification
+    """
+    from redis_cache import redis_cache
+    
+    wallet_address_lower = wallet_address.lower()
+    cached = redis_cache.get_score(wallet_address_lower)
+    
+    if not cached:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No cached score found for this wallet. Score needs to be calculated first."
+        )
+    
+    age_hours = redis_cache.get_age_hours(wallet_address_lower)
+    is_stale = redis_cache.is_stale(wallet_address_lower)
+    
+    return {
+        "wallet_address": cached['wallet_address'],
+        "score": cached['score'],
+        "score_breakdown": cached['score_breakdown'],
+        "classification": cached.get('classification'),
+        "networks_analyzed": cached.get('networks_analyzed'),
+        "total_networks": cached.get('total_networks'),
+        "calculated_at": cached['calculated_at'],
+        "expires_at": cached.get('expires_at'),
+        "age_hours": round(age_hours, 1),
+        "is_stale": is_stale,
+        "timestamp": cached['calculated_at'],
+        "message": "Consider refreshing score" if is_stale else "Score is up to date"
+    }
+
+
 @router.delete("/my-score")
 async def delete_my_score(
     current_wallet: str = Depends(get_current_wallet)

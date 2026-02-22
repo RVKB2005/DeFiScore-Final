@@ -1,20 +1,20 @@
 {
   "version_id": 1,
-  "timestamp": 1771760267,
+  "timestamp": 1771766149,
   "engine_version": "1.0.0",
   "feature_version": "1.0.0",
   "wallet_address": "0x995c6b8bd893afd139437da4322190beb5e6ddd6",
   "public_inputs": {
     "userAddress": "875536625096036045619365199197098495926965034454",
-    "scoreTotal": 300000,
+    "scoreTotal": 360000,
     "scoreRepayment": 0,
-    "scoreCapital": 0,
+    "scoreCapital": 60000,
     "scoreLongevity": 0,
     "scoreActivity": 0,
     "scoreProtocol": 0,
     "threshold": 600000,
-    "timestamp": 1771760267,
-    "nullifier": 113226278081940212284073755648091273832194494160304879936454725955010708426028,
+    "timestamp": 1771766149,
+    "nullifier": 105272787644143080753048206995661003928003117003156579371646021519964236555909,
     "versionId": 1
   },
   "private_inputs": {
@@ -47,11 +47,11 @@
     "failedTxRatio": 0,
     "highGasSpikeCount": 0,
     "zeroBalancePeriods": 0,
-    "nonce": 132266661907245113117735236483017556495808052781974476381700278319337188791
+    "nonce": 98289711168288279560313489154126818672606639356983966041439033880659710500
   },
   "metadata": {
     "score_band": "poor",
-    "raw_score": 300.0,
+    "raw_score": 360.0,
     "network": "polygon_amoy",
     "chain_id": 80002
   }

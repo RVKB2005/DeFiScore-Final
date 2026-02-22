@@ -393,6 +393,78 @@ export default function Borrow({ onWalletClick }: { onWalletClick?: () => void }
                               <span className="font-medium">{request.duration_days}d</span>
                             </div>
                           </div>
+                          
+                          {/* Repayment buttons for active loans */}
+                          {request.status === 'active' && request.supplier_address && (
+                            <div className="flex gap-2 mt-2">
+                              <Button 
+                                variant="outline" 
+                                size="sm"
+                                className="flex-1 text-xs"
+                                onClick={async () => {
+                                  try {
+                                    const { BrowserProvider, parseUnits } = await import('ethers');
+                                    if (!window.ethereum) {
+                                      toast.error('MetaMask not found');
+                                      return;
+                                    }
+                                    const provider = new BrowserProvider(window.ethereum);
+                                    const signer = await provider.getSigner();
+                                    
+                                    // Calculate interest (simple calculation for demo)
+                                    const interestAmount = (request.amount * request.requested_apy / 100 / 365 * request.duration_days).toFixed(4);
+                                    
+                                    const tx = await signer.sendTransaction({
+                                      to: request.supplier_address,
+                                      value: parseUnits(interestAmount, 18),
+                                      gasLimit: 21000n
+                                    });
+                                    
+                                    toast.info('Paying interest...', { id: 'pay-interest' });
+                                    await tx.wait();
+                                    toast.success(`Interest paid: ${interestAmount} MATIC`, { id: 'pay-interest' });
+                                  } catch (error: any) {
+                                    toast.error(error.code === 'ACTION_REJECTED' ? 'Transaction rejected' : 'Payment failed');
+                                  }
+                                }}
+                              >
+                                Pay Interest
+                              </Button>
+                              <Button 
+                                variant="default" 
+                                size="sm"
+                                className="flex-1 text-xs"
+                                onClick={async () => {
+                                  const amount = prompt(`Enter amount to repay (max: ${request.amount} MATIC):`);
+                                  if (!amount || isNaN(parseFloat(amount))) return;
+                                  
+                                  try {
+                                    const { BrowserProvider, parseUnits } = await import('ethers');
+                                    if (!window.ethereum) {
+                                      toast.error('MetaMask not found');
+                                      return;
+                                    }
+                                    const provider = new BrowserProvider(window.ethereum);
+                                    const signer = await provider.getSigner();
+                                    
+                                    const tx = await signer.sendTransaction({
+                                      to: request.supplier_address,
+                                      value: parseUnits(amount, 18),
+                                      gasLimit: 21000n
+                                    });
+                                    
+                                    toast.info('Repaying loan...', { id: 'repay-loan' });
+                                    await tx.wait();
+                                    toast.success(`Repaid: ${amount} MATIC`, { id: 'repay-loan' });
+                                  } catch (error: any) {
+                                    toast.error(error.code === 'ACTION_REJECTED' ? 'Transaction rejected' : 'Repayment failed');
+                                  }
+                                }}
+                              >
+                                Repay
+                              </Button>
+                            </div>
+                          )}
                         </div>
                       </Card>
                     </motion.div>

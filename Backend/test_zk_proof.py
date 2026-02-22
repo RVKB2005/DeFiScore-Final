@@ -77,18 +77,22 @@ features = FeatureVector(
     feature_version="1.0.0"
 )
 
+# Compute scores using circuit-compatible engine
+from circuit_score_engine import circuit_score_engine
+circuit_scores = circuit_score_engine.compute_total_score(features)
+
 score_result = CreditScoreResult(
-    credit_score=300.0,
+    credit_score=circuit_scores['total_score'],
     score_band="poor",
     breakdown=CreditScoreBreakdown(
-        repayment_behavior=0.0,  # All zeros because no transactions
-        capital_management=0.0,
-        wallet_longevity=0.0,
-        activity_patterns=0.0,
-        protocol_diversity=0.0,
-        risk_penalties=0.0
+        repayment_behavior=circuit_scores['repayment_behavior'],
+        capital_management=circuit_scores['capital_management'],
+        wallet_longevity=circuit_scores['wallet_longevity'],
+        activity_patterns=circuit_scores['activity_patterns'],
+        protocol_diversity=circuit_scores['protocol_diversity'],
+        risk_penalties=circuit_scores['risk_penalties']
     ),
-    raw_score=300.0,
+    raw_score=circuit_scores['total_score'],
     timestamp=datetime.now(timezone.utc),
     feature_version="1.0.0",
     engine_version="1.0.0"
@@ -97,6 +101,14 @@ score_result = CreditScoreResult(
 print("=" * 60)
 print("ZK PROOF GENERATION TEST")
 print("=" * 60)
+
+print(f"\nComputed circuit-compatible score: {circuit_scores['total_score']}")
+print(f"  Repayment: {circuit_scores['repayment_behavior']}")
+print(f"  Capital: {circuit_scores['capital_management']}")
+print(f"  Longevity: {circuit_scores['wallet_longevity']}")
+print(f"  Activity: {circuit_scores['activity_patterns']}")
+print(f"  Protocol: {circuit_scores['protocol_diversity']}")
+print(f"  Risk Penalties: {circuit_scores['risk_penalties']}")
 
 # Test with score BELOW threshold (should still work now!)
 threshold = 600

@@ -6,6 +6,7 @@ from routes import router as auth_router
 from data_ingestion_routes import router as ingestion_router
 from feature_extraction_routes import router as feature_router
 from credit_score_routes import router as credit_score_router
+from feature_routes import router as feature_data_router
 from webhook_routes import router as webhook_router
 from monitoring_routes import router as monitoring_router
 from zk_witness_routes import router as zk_witness_router
@@ -63,6 +64,7 @@ app.include_router(auth_router)
 app.include_router(ingestion_router)
 app.include_router(feature_router)
 app.include_router(credit_score_router)
+app.include_router(feature_data_router)
 app.include_router(webhook_router)
 app.include_router(monitoring_router)
 app.include_router(zk_witness_router)

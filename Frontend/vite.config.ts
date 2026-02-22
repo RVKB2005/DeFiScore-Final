@@ -16,6 +16,23 @@ export default defineConfig(({ mode }) => ({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
+      // Node.js polyfills for browser compatibility (needed for circomlibjs)
+      "events": "events",
+      "buffer": "buffer",
+      "util": "util",
+      "stream": "stream-browserify",
+    },
+  },
+  define: {
+    // Required for some crypto libraries
+    global: 'globalThis',
+  },
+  optimizeDeps: {
+    esbuildOptions: {
+      // Node.js global to browser globalThis
+      define: {
+        global: 'globalThis'
+      },
     },
   },
 }));
