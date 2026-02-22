@@ -81,7 +81,7 @@ export function HiddenScoreGauge({ onViewScore }: HiddenScoreGaugeProps) {
         transition={{ delay: 0.6 }}
         className="text-muted-foreground text-center mt-4 text-sm max-w-xs"
       >
-        Enter your password to decrypt and view your on-chain credit score.
+        Sign a message with your wallet to verify ownership and view your credit score.
       </motion.p>
     </div>
   );

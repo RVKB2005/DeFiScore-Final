@@ -27,14 +27,35 @@ class MultiChainIngestionService:
             networks: List of specific networks to use (None = all)
             mainnet_only: Only use mainnet networks (default: True)
         """
-        self.multi_client = MultiChainClient(networks=networks, mainnet_only=mainnet_only)
+        # Use lazy initialization to avoid connecting to all networks upfront
+        self.multi_client = MultiChainClient(networks=networks, mainnet_only=mainnet_only, lazy_init=True)
         self.ingestion_services: Dict[str, DataIngestionService] = {}
         
-        # Create ingestion service for each connected network
-        for network, client in self.multi_client.clients.items():
-            self.ingestion_services[network] = DataIngestionService(client)
+        logger.info(f"Multi-chain ingestion service initialized with lazy loading for {len(self.multi_client.available_networks)} networks")
+    
+    def _get_ingestion_service(self, network: str) -> Optional[DataIngestionService]:
+        """
+        Get or create ingestion service for a network (lazy initialization)
         
-        logger.info(f"Multi-chain ingestion service initialized with {len(self.ingestion_services)} networks")
+        Args:
+            network: Network name
+            
+        Returns:
+            DataIngestionService instance or None if network unavailable
+        """
+        # Return cached service if exists
+        if network in self.ingestion_services:
+            return self.ingestion_services[network]
+        
+        # Get or initialize network client
+        client = self.multi_client.get_client(network)
+        if not client:
+            return None
+        
+        # Create and cache ingestion service
+        service = DataIngestionService(client)
+        self.ingestion_services[network] = service
+        return service
     
     def get_wallet_summary_all_networks(self, wallet_address: str) -> Dict[str, Any]:
         """
@@ -87,20 +108,39 @@ class MultiChainIngestionService:
         Returns:
             Aggregated ingestion results from all networks
         """
-        logger.info(f"Starting multi-chain ingestion for {wallet_address}")
+        logger.info(f"========== MULTI-CHAIN INGESTION STARTED ==========")
+        logger.info(f"Wallet: {wallet_address}")
+        logger.info(f"Days back: {days_back}, Full history: {full_history}, Parallel: {parallel}")
         start_time = datetime.utcnow()
         
         # First, check which networks have activity
+        logger.info(f"Checking wallet activity across networks...")
         active_networks = self.multi_client.get_active_networks(wallet_address)
-        logger.info(f"Wallet has activity on {len(active_networks)} networks: {active_networks}")
+        logger.info(f"✓ Wallet has activity on {len(active_networks)} networks: {active_networks}")
+        
+        if not active_networks:
+            logger.warning(f"No activity found on any network for {wallet_address}")
+            return {
+                "wallet_address": wallet_address.lower(),
+                "networks_ingested": 0,
+                "successful_ingestions": 0,
+                "failed_ingestions": 0,
+                "total_transactions": 0,
+                "total_protocol_events": 0,
+                "total_balance_snapshots": 0,
+                "duration_seconds": 0,
+                "message": "No activity found"
+            }
         
         results = {}
         
         if parallel and len(active_networks) > 1:
             # Parallel ingestion
+            logger.info(f"Starting PARALLEL ingestion across {len(active_networks)} networks...")
             results = self._ingest_parallel(wallet_address, active_networks, days_back, full_history)
         else:
             # Sequential ingestion
+            logger.info(f"Starting SEQUENTIAL ingestion across {len(active_networks)} networks...")
             results = self._ingest_sequential(wallet_address, active_networks, days_back, full_history)
         
         end_time = datetime.utcnow()
@@ -113,6 +153,13 @@ class MultiChainIngestionService:
         
         successful = sum(1 for r in results.values() if isinstance(r, IngestionSummary) and r.status == "completed")
         failed = len(results) - successful
+        
+        logger.info(f"========== MULTI-CHAIN INGESTION COMPLETED ==========")
+        logger.info(f"Duration: {duration:.2f}s")
+        logger.info(f"Networks: {successful} successful, {failed} failed")
+        logger.info(f"Total transactions: {total_transactions}")
+        logger.info(f"Total protocol events: {total_events}")
+        logger.info(f"Total balance snapshots: {total_snapshots}")
         
         return {
             "wallet_address": wallet_address.lower(),
@@ -143,11 +190,13 @@ class MultiChainIngestionService:
         
         def ingest_network(network: str):
             try:
+                logger.info(f"[{network}] Starting ingestion...")
                 service = self.ingestion_services[network]
                 summary = service.ingest_wallet_data(wallet_address, days_back, full_history)
+                logger.info(f"[{network}] ✓ Ingestion completed: {summary.total_transactions} txs, {summary.total_protocol_events} events")
                 return network, summary
             except Exception as e:
-                logger.error(f"Ingestion failed for {network}: {e}")
+                logger.error(f"[{network}] ✗ Ingestion failed: {e}")
                 return network, None
         
         with ThreadPoolExecutor(max_workers=5) as executor:
@@ -173,14 +222,15 @@ class MultiChainIngestionService:
         """Execute ingestions sequentially"""
         results = {}
         
-        for network in networks:
+        for i, network in enumerate(networks, 1):
             try:
+                logger.info(f"[{network}] ({i}/{len(networks)}) Starting ingestion...")
                 service = self.ingestion_services[network]
                 summary = service.ingest_wallet_data(wallet_address, days_back, full_history)
                 results[network] = summary
-                logger.info(f"✓ Completed ingestion for {network}")
+                logger.info(f"[{network}] ✓ Completed: {summary.total_transactions} txs, {summary.total_protocol_events} events")
             except Exception as e:
-                logger.error(f"✗ Ingestion failed for {network}: {e}")
+                logger.error(f"[{network}] ✗ Failed: {e}")
         
         return results
     

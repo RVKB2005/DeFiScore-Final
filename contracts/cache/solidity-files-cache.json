@@ -1,0 +1,266 @@
+{
+  "_format": "hh-sol-cache-2",
+  "files": {
+    "D:\\DeFiScore\\contracts\\contracts\\CircuitVersionManager.sol": {
+      "lastModificationDate": 1771753104753,
+      "contentHash": "02f3b357bef0a2743be23fdae49f2db1",
+      "sourceName": "contracts/CircuitVersionManager.sol",
+      "solcConfig": {
+        "version": "0.8.20",
+        "settings": {
+          "optimizer": {
+            "enabled": true,
+            "runs": 200
+          },
+          "evmVersion": "paris",
+          "outputSelection": {
+            "*": {
+              "*": [
+                "abi",
+                "evm.bytecode",
+                "evm.deployedBytecode",
+                "evm.methodIdentifiers",
+                "metadata"
+              ],
+              "": [
+                "ast"
+              ]
+            }
+          }
+        }
+      },
+      "imports": [
+        "./DeFiScoreRegistry.sol"
+      ],
+      "versionPragmas": [
+        "^0.8.20"
+      ],
+      "artifacts": [
+        "CircuitVersionManager"
+      ]
+    },
+    "D:\\DeFiScore\\contracts\\contracts\\DeFiScoreRegistry.sol": {
+      "lastModificationDate": 1771753061970,
+      "contentHash": "958b003a64c3be884760dec4a8cc8535",
+      "sourceName": "contracts/DeFiScoreRegistry.sol",
+      "solcConfig": {
+        "version": "0.8.20",
+        "settings": {
+          "optimizer": {
+            "enabled": true,
+            "runs": 200
+          },
+          "evmVersion": "paris",
+          "outputSelection": {
+            "*": {
+              "*": [
+                "abi",
+                "evm.bytecode",
+                "evm.deployedBytecode",
+                "evm.methodIdentifiers",
+                "metadata"
+              ],
+              "": [
+                "ast"
+              ]
+            }
+          }
+        }
+      },
+      "imports": [],
+      "versionPragmas": [
+        "^0.8.20"
+      ],
+      "artifacts": [
+        "DeFiScoreRegistry",
+        "IVerifier"
+      ]
+    },
+    "D:\\DeFiScore\\contracts\\contracts\\LenderIntegration.sol": {
+      "lastModificationDate": 1771753117140,
+      "contentHash": "f20cc3ba5db7e3343f4757c5bb4f9693",
+      "sourceName": "contracts/LenderIntegration.sol",
+      "solcConfig": {
+        "version": "0.8.20",
+        "settings": {
+          "optimizer": {
+            "enabled": true,
+            "runs": 200
+          },
+          "evmVersion": "paris",
+          "outputSelection": {
+            "*": {
+              "*": [
+                "abi",
+                "evm.bytecode",
+                "evm.deployedBytecode",
+                "evm.methodIdentifiers",
+                "metadata"
+              ],
+              "": [
+                "ast"
+              ]
+            }
+          }
+        }
+      },
+      "imports": [
+        "./DeFiScoreRegistry.sol"
+      ],
+      "versionPragmas": [
+        "^0.8.20"
+      ],
+      "artifacts": [
+        "LenderIntegration"
+      ]
+    },
+    "D:\\DeFiScore\\contracts\\contracts\\DeployVerifier.sol": {
+      "lastModificationDate": 1771753134598,
+      "contentHash": "601d2cf3c2010158e80008d2dc4dcc34",
+      "sourceName": "contracts/DeployVerifier.sol",
+      "solcConfig": {
+        "version": "0.8.20",
+        "settings": {
+          "optimizer": {
+            "enabled": true,
+            "runs": 200
+          },
+          "evmVersion": "paris",
+          "outputSelection": {
+            "*": {
+              "*": [
+                "abi",
+                "evm.bytecode",
+                "evm.deployedBytecode",
+                "evm.methodIdentifiers",
+                "metadata"
+              ],
+              "": [
+                "ast"
+              ]
+            }
+          }
+        }
+      },
+      "imports": [
+        "./Verifier.sol"
+      ],
+      "versionPragmas": [
+        "^0.8.20"
+      ],
+      "artifacts": [
+        "DeployVerifier"
+      ]
+    },
+    "D:\\DeFiScore\\contracts\\contracts\\Verifier.sol": {
+      "lastModificationDate": 1771753061978,
+      "contentHash": "858a94c5a2c54d1fb28690c4ecaa0a84",
+      "sourceName": "contracts/Verifier.sol",
+      "solcConfig": {
+        "version": "0.8.20",
+        "settings": {
+          "optimizer": {
+            "enabled": true,
+            "runs": 200
+          },
+          "evmVersion": "paris",
+          "outputSelection": {
+            "*": {
+              "*": [
+                "abi",
+                "evm.bytecode",
+                "evm.deployedBytecode",
+                "evm.methodIdentifiers",
+                "metadata"
+              ],
+              "": [
+                "ast"
+              ]
+            }
+          }
+        }
+      },
+      "imports": [],
+      "versionPragmas": [
+        ">=0.7.0 <0.9.0"
+      ],
+      "artifacts": [
+        "Groth16Verifier"
+      ]
+    },
+    "D:\\DeFiScore\\contracts\\contracts\\LendingEscrow.sol": {
+      "lastModificationDate": 1771753061975,
+      "contentHash": "86629656175c666ec6606243ce09d970",
+      "sourceName": "contracts/LendingEscrow.sol",
+      "solcConfig": {
+        "version": "0.8.20",
+        "settings": {
+          "optimizer": {
+            "enabled": true,
+            "runs": 200
+          },
+          "evmVersion": "paris",
+          "outputSelection": {
+            "*": {
+              "*": [
+                "abi",
+                "evm.bytecode",
+                "evm.deployedBytecode",
+                "evm.methodIdentifiers",
+                "metadata"
+              ],
+              "": [
+                "ast"
+              ]
+            }
+          }
+        }
+      },
+      "imports": [],
+      "versionPragmas": [
+        "^0.8.19"
+      ],
+      "artifacts": [
+        "IDeFiScoreRegistry",
+        "IERC20",
+        "LendingEscrow"
+      ]
+    },
+    "D:\\DeFiScore\\contracts\\contracts\\SecurityGuard.sol": {
+      "lastModificationDate": 1771753092479,
+      "contentHash": "8923c0b49ce129ccc749edb336abe9f1",
+      "sourceName": "contracts/SecurityGuard.sol",
+      "solcConfig": {
+        "version": "0.8.20",
+        "settings": {
+          "optimizer": {
+            "enabled": true,
+            "runs": 200
+          },
+          "evmVersion": "paris",
+          "outputSelection": {
+            "*": {
+              "*": [
+                "abi",
+                "evm.bytecode",
+                "evm.deployedBytecode",
+                "evm.methodIdentifiers",
+                "metadata"
+              ],
+              "": [
+                "ast"
+              ]
+            }
+          }
+        }
+      },
+      "imports": [],
+      "versionPragmas": [
+        "^0.8.20"
+      ],
+      "artifacts": [
+        "SecurityGuard"
+      ]
+    }
+  }
+}

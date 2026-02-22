@@ -3,6 +3,9 @@ from typing import Optional
 from datetime import datetime, timedelta
 from config import settings
 import json
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class NonceStore:
@@ -66,12 +69,17 @@ class NonceStore:
         data = self.redis_client.get(key)
         
         if data is None:
+            logger.debug(f"No nonce found for address: {address}")
             return None
         
         try:
             parsed = json.loads(data)
-            return parsed.get('nonce')
-        except Exception:
+            nonce = parsed.get('nonce')
+            if not nonce:
+                logger.warning(f"Nonce data exists but nonce field is missing for address: {address}")
+            return nonce
+        except Exception as e:
+            logger.error(f"Failed to parse nonce data for address {address}: {e}")
             return None
     
     def verify_and_consume_nonce(self, address: str, nonce: str) -> bool:
@@ -136,9 +144,11 @@ class InMemoryNonceStore:
         data = self.store.get(address.lower())
         
         if data is None:
+            logger.debug(f"No nonce found for address: {address}")
             return None
         
         if datetime.utcnow() > data['expires_at']:
+            logger.info(f"Nonce expired for address: {address}")
             del self.store[address.lower()]
             return None
         
@@ -174,6 +184,8 @@ def get_nonce_store():
         # Test the connection
         store.redis_client.ping()
         return store
-    except (redis.ConnectionError, redis.exceptions.ConnectionError, Exception):
-        # Silently fall back to in-memory store
+    except (redis.ConnectionError, redis.exceptions.ConnectionError, Exception) as e:
+        # Fall back to in-memory store with warning
+        logger.warning(f"Redis connection failed, using in-memory nonce store: {e}")
+        logger.warning("WARNING: In-memory nonce store is not suitable for production multi-instance deployments")
         return InMemoryNonceStore()

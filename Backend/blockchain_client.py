@@ -3,7 +3,20 @@ Blockchain Client for Data Ingestion
 Handles connection to Ethereum blockchain and data fetching
 """
 from web3 import Web3
-from web3.middleware import geth_poa_middleware
+try:
+    # Try direct import first (web3.py v5 and some v6 versions)
+    from web3.middleware import geth_poa_middleware
+except (ImportError, AttributeError):
+    try:
+        # Try from geth_poa submodule (web3.py v6+)
+        from web3.middleware.geth_poa import geth_poa_middleware
+    except ImportError:
+        try:
+            # Try ExtraDataToPOAMiddleware (web3.py v6+ alternative name)
+            from web3.middleware import ExtraDataToPOAMiddleware as geth_poa_middleware
+        except ImportError:
+            # If all fail, create a dummy middleware
+            geth_poa_middleware = None
 from web3.exceptions import BlockNotFound, TransactionNotFound
 from typing import Optional, List, Dict, Any, Tuple
 from datetime import datetime, timezone
@@ -24,27 +37,103 @@ class BlockchainClient:
     
     def __init__(self, rpc_url: Optional[str] = None):
         """
-        Initialize blockchain client
+        Initialize blockchain client with retry logic for rate limits
         
         Args:
             rpc_url: RPC endpoint URL (defaults to config)
         """
-        self.rpc_url = rpc_url or settings.ETHEREUM_RPC_URL
-        self.w3 = Web3(Web3.HTTPProvider(self.rpc_url))
+        import time
+        import random
         
-        if not self.w3.is_connected():
-            raise ConnectionError(f"Failed to connect to Ethereum node at {self.rpc_url}")
+        self.rpc_url = rpc_url or settings.ETHEREUM_MAINNET_RPC
+        
+        # Add timeout to prevent hanging connections
+        request_kwargs = {'timeout': 120}  # Increased to 120 seconds
+        self.w3 = Web3(Web3.HTTPProvider(self.rpc_url, request_kwargs=request_kwargs))
+        
+        # Check connection with retry logic
+        max_retries = 5
+        maximum_backoff = 32
+        connected = False
+        last_error = None
+        
+        for attempt in range(max_retries):
+            try:
+                connected = self.w3.is_connected()
+                if connected:
+                    break
+                else:
+                    # Not connected but no exception - wait and retry
+                    if attempt < max_retries - 1:
+                        random_ms = random.randint(0, 1000) / 1000.0
+                        wait_time = min(((2 ** attempt) + random_ms), maximum_backoff)
+                        logger.warning(f"Connection check failed, retrying in {wait_time:.2f}s (attempt {attempt + 1}/{max_retries})")
+                        time.sleep(wait_time)
+                        continue
+            except Exception as e:
+                last_error = e
+                error_str = str(e)
+                if "429" in error_str or "Too Many Requests" in error_str:
+                    if attempt < max_retries - 1:
+                        random_ms = random.randint(0, 1000) / 1000.0
+                        wait_time = min(((2 ** attempt) + random_ms), maximum_backoff)
+                        logger.warning(f"Rate limit on connection check, retrying in {wait_time:.2f}s (attempt {attempt + 1}/{max_retries})")
+                        time.sleep(wait_time)
+                        continue
+                    else:
+                        raise ConnectionError(f"Rate limit exceeded after {max_retries} attempts: {e}")
+                else:
+                    # Log the error but continue retrying
+                    logger.warning(f"Connection error (attempt {attempt + 1}/{max_retries}): {e}")
+                    if attempt < max_retries - 1:
+                        random_ms = random.randint(0, 1000) / 1000.0
+                        wait_time = min(((2 ** attempt) + random_ms), maximum_backoff)
+                        time.sleep(wait_time)
+                        continue
+                    else:
+                        raise ConnectionError(f"Failed to connect after {max_retries} attempts: {e}")
+        
+        if not connected:
+            error_msg = f"Failed to connect to Ethereum node at {self.rpc_url}"
+            if last_error:
+                error_msg += f" (Last error: {last_error})"
+            raise ConnectionError(error_msg)
+        
+        logger.info(f"✓ Connected to Ethereum node")
+        
+        # Get chain ID with retry logic for rate limits
+        chain_id = None
+        
+        for attempt in range(max_retries):
+            try:
+                chain_id = self.w3.eth.chain_id
+                break  # Success
+            except Exception as e:
+                error_str = str(e)
+                if "429" in error_str or "Too Many Requests" in error_str:
+                    if attempt < max_retries - 1:
+                        random_ms = random.randint(0, 1000) / 1000.0
+                        wait_time = min(((2 ** attempt) + random_ms), maximum_backoff)
+                        logger.warning(f"Rate limit on chain_id, retrying in {wait_time:.2f}s (attempt {attempt + 1}/{max_retries})")
+                        time.sleep(wait_time)
+                        continue
+                    else:
+                        raise ConnectionError(f"Rate limit exceeded after {max_retries} attempts: {e}")
+                else:
+                    raise  # Re-raise non-rate-limit errors
+        
+        if chain_id is None:
+            raise ConnectionError("Failed to get chain ID after retries")
         
         # Inject POA middleware for POA chains
-        try:
-            chain_id = self.w3.eth.chain_id
-            if chain_id in self.POA_CHAIN_IDS:
+        if chain_id in self.POA_CHAIN_IDS:
+            if geth_poa_middleware is not None:
                 self.w3.middleware_onion.inject(geth_poa_middleware, layer=0)
                 logger.info(f"POA middleware injected for chain {chain_id}")
-        except Exception as e:
-            logger.warning(f"Could not inject POA middleware: {e}")
+            else:
+                logger.warning(f"POA middleware not available for chain {chain_id} - some operations may fail")
         
-        logger.info(f"Connected to Ethereum node. Chain ID: {self.w3.eth.chain_id}")
+        logger.info(f"✓ Connected to Ethereum node. Chain ID: {chain_id}")
     
     def is_connected(self) -> bool:
         """Check if connected to blockchain"""
@@ -71,18 +160,22 @@ class BlockchainClient:
             logger.warning(f"Block {block_identifier} not found")
             return None
     
-    def get_wallet_balance(self, address: str) -> int:
+    def get_wallet_balance(self, address: str, block_identifier: Optional[int] = None) -> int:
         """
-        Get current ETH balance for wallet
+        Get ETH balance for wallet at specific block (requires archive node)
         
         Args:
             address: Wallet address
+            block_identifier: Block number (None = latest, requires archive node for historical)
             
         Returns:
             Balance in Wei
         """
         checksum_address = Web3.to_checksum_address(address)
-        return self.w3.eth.get_balance(checksum_address)
+        if block_identifier is None:
+            return self.w3.eth.get_balance(checksum_address)
+        else:
+            return self.w3.eth.get_balance(checksum_address, block_identifier)
     
     def get_transaction_count(self, address: str) -> int:
         """

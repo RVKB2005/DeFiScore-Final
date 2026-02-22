@@ -1,0 +1,34 @@
+{
+  "timestamp": "2026-02-22T11:37:40.743Z",
+  "circuit": "DeFiCreditScore",
+  "version": "1.0.0",
+  "ceremony": {
+    "phase1": {
+      "source": "Hermez Powers of Tau",
+      "power": 16,
+      "max_constraints": 65536,
+      "url": "https://storage.googleapis.com/zkevm/ptau/powersOfTau28_hez_final_16.ptau"
+    },
+    "phase2": {
+      "contributions": 1,
+      "entropy_source": "crypto.randomBytes(32)",
+      "contributor": "Production Setup"
+    }
+  },
+  "files": {
+    "proving_key": "DeFiCreditScore_final.zkey",
+    "verification_key": "DeFiCreditScore_verification_key.json",
+    "powers_of_tau": "powersOfTau28_hez_final_16.ptau"
+  },
+  "sizes": {
+    "proving_key_mb": "0.67",
+    "verification_key_kb": "4.64",
+    "powers_of_tau_mb": "72.08"
+  },
+  "security": {
+    "trusted_setup_type": "Groth16",
+    "toxic_waste_destroyed": true,
+    "reproducible": true,
+    "ceremony_transcript": "Available in zkey file"
+  }
+}

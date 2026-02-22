@@ -99,7 +99,7 @@ export function Navbar({ onMenuClick, onWalletClick, isMobileMenuOpen }: NavbarP
               </AnimatePresence>
             </div>
           ) : (
-            <Button variant="glow" onClick={onWalletClick} className="gap-2">
+            <Button variant="default" onClick={onWalletClick} className="gap-2">
               <Wallet className="w-4 h-4" />
               <span className="hidden sm:inline">Connect Wallet</span>
             </Button>

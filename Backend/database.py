@@ -2,7 +2,7 @@
 Database configuration and models for data ingestion
 Uses PostgreSQL for structured data storage
 """
-from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, Boolean, BigInteger, Enum as SQLEnum, Text
+from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, Boolean, BigInteger, Enum as SQLEnum, Text, Numeric, UniqueConstraint
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from datetime import datetime
@@ -24,7 +24,7 @@ class WalletMetadataDB(Base):
     chain_id = Column(Integer, nullable=False, default=1)
     first_seen_block = Column(Integer, nullable=False)
     first_seen_timestamp = Column(DateTime, nullable=False)
-    current_balance_wei = Column(BigInteger, nullable=False)
+    current_balance_wei = Column(Numeric(precision=78, scale=0), nullable=False)  # Support up to 10^78
     current_balance_eth = Column(Float, nullable=False)
     transaction_count = Column(Integer, nullable=False)
     ingestion_timestamp = Column(DateTime, default=datetime.utcnow)
@@ -44,13 +44,18 @@ class TransactionRecordDB(Base):
     timestamp = Column(DateTime, index=True, nullable=False)
     from_address = Column(String(42), nullable=False)
     to_address = Column(String(42), nullable=True)
-    value_wei = Column(BigInteger, nullable=False)
+    value_wei = Column(Numeric(precision=78, scale=0), nullable=False)  # Support up to 10^78
     value_eth = Column(Float, nullable=False)
     gas_used = Column(Integer, nullable=True)
-    gas_price_wei = Column(BigInteger, nullable=True)
+    gas_price_wei = Column(Numeric(precision=78, scale=0), nullable=True)  # Support up to 10^78
     status = Column(Boolean, nullable=False)
     is_contract_interaction = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
+    
+    # Add unique constraint for bulk INSERT optimization
+    __table_args__ = (
+        UniqueConstraint('tx_hash', 'network', name='uix_tx_hash_network'),
+    )
 
 
 class ProtocolEventDB(Base):
@@ -68,7 +73,7 @@ class ProtocolEventDB(Base):
     block_number = Column(Integer, index=True, nullable=False)
     timestamp = Column(DateTime, index=True, nullable=False)
     asset = Column(String(42), nullable=True)
-    amount_wei = Column(BigInteger, nullable=True)
+    amount_wei = Column(Numeric(precision=78, scale=0), nullable=True)  # Support up to 10^78
     amount_eth = Column(Float, nullable=True)
     log_index = Column(Integer, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -84,7 +89,7 @@ class BalanceSnapshotDB(Base):
     chain_id = Column(Integer, nullable=False, default=1)
     block_number = Column(Integer, index=True, nullable=False)
     timestamp = Column(DateTime, index=True, nullable=False)
-    balance_wei = Column(BigInteger, nullable=False)
+    balance_wei = Column(Numeric(precision=78, scale=0), nullable=False)  # Support up to 10^78
     balance_eth = Column(Float, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 
@@ -138,3 +143,9 @@ def get_db():
         yield db
     finally:
         db.close()
+
+
+# Create global instances for production use
+db_manager = DatabaseManager()
+SessionLocal = db_manager.SessionLocal
+engine = db_manager.engine

@@ -50,7 +50,9 @@ class ProtocolEventType(str, Enum):
     REPAY = "repay"
     LIQUIDATION = "liquidation"
     SUPPLY = "supply"
+    SWAP = "swap"
     UNKNOWN = "unknown"
+
 
 
 class ProtocolEvent(BaseModel):

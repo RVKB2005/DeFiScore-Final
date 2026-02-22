@@ -1,34 +1,208 @@
+import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { ArrowUp, ArrowDown, Eye } from 'lucide-react';
+import { ArrowUp, ArrowDown, Eye, Loader2 } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { useWallet } from '@/hooks/useWallet';
+import { useMarketData } from '@/contexts/MarketDataContext';
+import { useUserData } from '@/contexts/UserDataContext';
 import { formatCurrency, formatPercent } from '@/utils/formatters';
 import { Link } from 'react-router-dom';
 
-// Mock data for the dashboard
-const walletBalance = {
-  amount: 12.50,
-  symbol: 'ETH',
-  usdValue: 28450.00,
-  netApy: 4.25,
-  healthFactor: 2.45,
-};
+interface UserDashboardProps {
+  onWalletClick?: () => void;
+}
 
-const assetsToSupply = [
-  { id: '1', symbol: 'ETH', icon: '⟠', liquidity: '1.4M', liquidityUsd: '$3.2B', apy: 2.84 },
-  { id: '2', symbol: 'USDC', icon: '💵', liquidity: '450M', liquidityUsd: '$450M', apy: 5.12 },
-  { id: '3', symbol: 'WBTC', icon: '₿', liquidity: '12.5k', liquidityUsd: '$840M', apy: 1.25 },
-];
-
-const assetsToBorrow = [
-  { id: '1', symbol: 'GHO', icon: '👻', available: '12.2M', availableUsd: '$12.2M', apy: 3.50 },
-  { id: '2', symbol: 'USDT', icon: '💰', available: '210M', availableUsd: '$210M', apy: 6.85 },
-  { id: '3', symbol: 'LINK', icon: '⛓️', available: '1.2M', availableUsd: '$22M', apy: 4.10 },
-];
-
-export default function UserDashboard() {
+export default function UserDashboard({ onWalletClick }: UserDashboardProps) {
   const { isConnected } = useWallet();
+  const { topAssets } = useMarketData();
+  const { walletBalance, userStats, protocolPositions, loading } = useUserData();
+  const [assetsToSupply, setAssetsToSupply] = useState<any[]>([]);
+  const [assetsToBorrow, setAssetsToBorrow] = useState<any[]>([]);
+  const [loadingProgress, setLoadingProgress] = useState(0);
+
+  useEffect(() => {
+    if (isConnected) {
+      // Simulate progress for visual feedback
+      if (loading) {
+        const interval = setInterval(() => {
+          setLoadingProgress(prev => {
+            if (prev >= 100) {
+              clearInterval(interval);
+              return 100;
+            }
+            return prev + 33;
+          });
+        }, 300);
+        return () => clearInterval(interval);
+      } else {
+        setLoadingProgress(100);
+      }
+    }
+  }, [isConnected, loading]);
+
+  // Update assets when market data changes
+  useEffect(() => {
+    if (topAssets.length > 0) {
+      updateAssetLists();
+    }
+  }, [topAssets]);
+
+  const updateAssetLists = () => {
+    // Ensure topAssets is available
+    if (!topAssets || topAssets.length === 0) {
+      return;
+    }
+
+    // Use cached market data for supply/borrow assets
+    const supplyAssets = topAssets
+      .filter(a => a.supplyApy != null && a.supplyApy > 0)
+      .sort((a, b) => (b.supplyApy || 0) - (a.supplyApy || 0))
+      .slice(0, 3)
+      .map(asset => ({
+        id: asset.id,
+        symbol: asset.symbol,
+        icon: asset.icon,
+        liquidity: formatLargeNumber(asset.marketCap),
+        liquidityUsd: formatCurrency(asset.marketCap, true),
+        apy: asset.supplyApy
+      }));
+
+    const borrowAssets = topAssets
+      .filter(a => a.supplyApy != null && a.supplyApy > 0)
+      .sort((a, b) => b.volume24h - a.volume24h)
+      .slice(0, 3)
+      .map(asset => ({
+        id: asset.id,
+        symbol: asset.symbol,
+        icon: asset.icon,
+        available: formatLargeNumber(asset.volume24h),
+        availableUsd: formatCurrency(asset.volume24h, true),
+        apy: asset.borrowApy || asset.supplyApy
+      }));
+
+    setAssetsToSupply(supplyAssets);
+    setAssetsToBorrow(borrowAssets);
+  };
+
+  const formatLargeNumber = (num: number): string => {
+    if (num >= 1e9) return `${(num / 1e9).toFixed(1)}B`;
+    if (num >= 1e6) return `${(num / 1e6).toFixed(1)}M`;
+    if (num >= 1e3) return `${(num / 1e3).toFixed(1)}K`;
+    return num.toFixed(0);
+  };
+
+  if (!isConnected) {
+    return (
+      <div className="flex items-center justify-center min-h-[70vh]">
+        <motion.div
+          initial={{ opacity: 0, scale: 0.9 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className="text-center max-w-md"
+        >
+          {/* Ghost/Wallet Illustration */}
+          <motion.div
+            initial={{ y: 0 }}
+            animate={{ y: [-10, 0, -10] }}
+            transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
+            className="mb-8"
+          >
+            <div className="relative inline-block">
+              {/* Glow effect */}
+              <div className="absolute inset-0 bg-primary/20 blur-3xl rounded-full" />
+              
+              {/* Ghost/Wallet Icon */}
+              <div className="relative w-32 h-32 mx-auto">
+                <svg viewBox="0 0 120 120" className="w-full h-full">
+                  {/* Ghost body */}
+                  <path
+                    d="M60 20 C40 20, 25 35, 25 55 L25 95 L35 85 L45 95 L55 85 L65 95 L75 85 L85 95 L95 85 L95 55 C95 35, 80 20, 60 20 Z"
+                    fill="currentColor"
+                    className="text-muted-foreground/30"
+                  />
+                  {/* Eyes */}
+                  <circle cx="45" cy="50" r="5" fill="currentColor" className="text-foreground/60" />
+                  <circle cx="75" cy="50" r="5" fill="currentColor" className="text-foreground/60" />
+                  {/* Wallet on head */}
+                  <rect x="50" y="15" width="20" height="15" rx="2" fill="currentColor" className="text-primary/60" />
+                  <rect x="65" y="20" width="3" height="6" rx="1" fill="currentColor" className="text-primary" />
+                </svg>
+              </div>
+            </div>
+          </motion.div>
+
+          {/* Text Content */}
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.2 }}
+            className="space-y-4"
+          >
+            <h2 className="text-3xl font-bold">Please, connect your wallet</h2>
+            <p className="text-muted-foreground text-lg">
+              Please connect your wallet to see your supplies, borrowings, and open positions.
+            </p>
+          </motion.div>
+
+          {/* Connect Button */}
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.4 }}
+            className="mt-8"
+          >
+            <Button
+              variant="default"
+              size="lg"
+              className="text-lg px-8 py-6"
+              onClick={onWalletClick}
+            >
+              Connect wallet
+            </Button>
+          </motion.div>
+
+          {/* Additional Info */}
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.6 }}
+            className="mt-8 flex items-center justify-center gap-2 text-sm text-muted-foreground"
+          >
+            <div className="w-2 h-2 rounded-full bg-success animate-pulse" />
+            <span>Secure • Privacy-First • Decentralized</span>
+          </motion.div>
+        </motion.div>
+      </div>
+    );
+  }
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <div className="w-full max-w-md space-y-6">
+          <div className="text-center space-y-2">
+            <h3 className="text-xl font-semibold">Fetching Wallet Data</h3>
+            <p className="text-sm text-muted-foreground">Loading your portfolio and positions...</p>
+          </div>
+          
+          {/* Progress bar */}
+          <div className="space-y-2">
+            <div className="h-2 bg-muted rounded-full overflow-hidden">
+              <motion.div
+                className="h-full bg-gradient-to-r from-primary to-purple-500"
+                initial={{ width: "0%" }}
+                animate={{ width: `${loadingProgress}%` }}
+                transition={{ duration: 0.3, ease: "easeOut" }}
+              />
+            </div>
+            <p className="text-xs text-center text-muted-foreground">
+              {Math.round(loadingProgress)}% complete
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-8 pb-12">
@@ -93,12 +267,19 @@ export default function UserDashboard() {
                       My Wallet Balance
                     </p>
                     <div className="flex items-baseline gap-2 mt-2">
-                      <span className="text-3xl font-bold">{walletBalance.amount}</span>
-                      <span className="text-xl font-semibold">{walletBalance.symbol}</span>
+                      <span className="text-3xl font-bold">
+                        {walletBalance?.amount?.toFixed(4) || '0.0000'}
+                      </span>
+                      <span className="text-xl font-semibold">{walletBalance?.symbol || 'ETH'}</span>
                     </div>
                     <p className="text-sm text-muted-foreground mt-1">
-                      ≈ {formatCurrency(walletBalance.usdValue)}
+                      ≈ {formatCurrency(walletBalance?.usd_value || 0)}
                     </p>
+                    {!walletBalance?.has_data && !loading && (
+                      <p className="text-xs text-muted-foreground mt-2">
+                        No transaction history
+                      </p>
+                    )}
                   </div>
                   <div className="w-10 h-10 rounded-full bg-cyan-500/20 flex items-center justify-center">
                     <span className="text-cyan-400 text-lg">⟠</span>
@@ -126,13 +307,16 @@ export default function UserDashboard() {
                   <div className="flex justify-between items-center">
                     <span className="text-sm text-muted-foreground">Net APY</span>
                     <span className="text-sm font-medium text-success">
-                      +{formatPercent(walletBalance.netApy)}
+                      {protocolPositions?.net_apy ? `+${formatPercent(protocolPositions.net_apy)}` : 'N/A'}
                     </span>
                   </div>
                   <div className="flex justify-between items-center">
                     <span className="text-sm text-muted-foreground">Health Factor</span>
-                    <span className="text-sm font-medium text-success">
-                      {walletBalance.healthFactor.toFixed(2)}
+                    <span className={`text-sm font-medium ${
+                      protocolPositions?.health_factor > 2 ? 'text-success' : 
+                      protocolPositions?.health_factor > 1.5 ? 'text-warning' : 'text-destructive'
+                    }`}>
+                      {protocolPositions?.health_factor ? protocolPositions.health_factor.toFixed(2) : 'N/A'}
                     </span>
                   </div>
                 </div>
@@ -189,9 +373,13 @@ export default function UserDashboard() {
                       >
                         <td className="px-4 py-4">
                           <div className="flex items-center gap-3">
-                            <div className="w-8 h-8 rounded-full bg-muted/50 flex items-center justify-center text-base">
-                              {asset.icon}
-                            </div>
+                            {typeof asset.icon === 'string' && asset.icon.startsWith('http') ? (
+                              <img src={asset.icon} alt={asset.symbol} className="w-8 h-8 rounded-full" />
+                            ) : (
+                              <div className="w-8 h-8 rounded-full bg-muted/50 flex items-center justify-center text-base">
+                                {asset.icon}
+                              </div>
+                            )}
                             <span className="font-medium">{asset.symbol}</span>
                           </div>
                         </td>
@@ -265,9 +453,13 @@ export default function UserDashboard() {
                       >
                         <td className="px-4 py-4">
                           <div className="flex items-center gap-3">
-                            <div className="w-8 h-8 rounded-full bg-muted/50 flex items-center justify-center text-base">
-                              {asset.icon}
-                            </div>
+                            {typeof asset.icon === 'string' && asset.icon.startsWith('http') ? (
+                              <img src={asset.icon} alt={asset.symbol} className="w-8 h-8 rounded-full" />
+                            ) : (
+                              <div className="w-8 h-8 rounded-full bg-muted/50 flex items-center justify-center text-base">
+                                {asset.icon}
+                              </div>
+                            )}
                             <span className="font-medium">{asset.symbol}</span>
                           </div>
                         </td>
@@ -296,32 +488,6 @@ export default function UserDashboard() {
           </Card>
         </motion.div>
       </div>
-
-      {/* Footer */}
-      <motion.footer
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ delay: 0.5 }}
-        className="pt-12 border-t border-border/50"
-      >
-        <div className="flex flex-col md:flex-row items-center justify-between gap-4">
-          <div className="flex items-center gap-2">
-            <div className="w-6 h-6 rounded-lg bg-gradient-to-br from-primary to-purple-500 flex items-center justify-center">
-              <span className="text-primary-foreground font-bold text-xs">D</span>
-            </div>
-            <span className="font-semibold text-sm">DeFiScore</span>
-          </div>
-          <div className="flex items-center gap-6 text-sm text-muted-foreground">
-            <a href="#" className="hover:text-foreground transition-colors">Privacy Policy</a>
-            <a href="#" className="hover:text-foreground transition-colors">Terms of Service</a>
-            <a href="#" className="hover:text-foreground transition-colors">Documentation</a>
-            <a href="#" className="hover:text-foreground transition-colors">API</a>
-          </div>
-          <p className="text-xs text-muted-foreground">
-            © 2024 DeFiScore. All rights reserved.
-          </p>
-        </div>
-      </motion.footer>
     </div>
   );
 }

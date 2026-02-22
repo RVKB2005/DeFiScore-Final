@@ -112,6 +112,23 @@ class AuthService {
 
     return response.json();
   }
+
+  async startDataIngestion(address: string, token: string): Promise<{ job_id: string; status: string }> {
+    const response = await fetch(`${this.baseUrl}/api/v1/ingestion/wallet/${address}/ingest`, {
+      method: 'POST',
+      headers: getAuthHeaders(token),
+      body: JSON.stringify({
+        networks: ['ethereum', 'polygon', 'arbitrum', 'optimism', 'base'] // Start with major networks
+      }),
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: 'Failed to start ingestion' }));
+      throw new Error(error.detail || 'Failed to start ingestion');
+    }
+
+    return response.json();
+  }
 }
 
 export const authService = new AuthService();

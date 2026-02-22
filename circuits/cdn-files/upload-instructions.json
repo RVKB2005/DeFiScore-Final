@@ -1,0 +1,92 @@
+{
+  "timestamp": "2026-02-22T08:50:07.131Z",
+  "files": [
+    {
+      "name": "DeFiCreditScore.wasm",
+      "originalSize": 2026870,
+      "compressedSize": 980672,
+      "compressionRatio": "51.6",
+      "checksum": "e36fe4a49208cccb90087e51945744de092e7a46ec7359f0e1c1133293471c38",
+      "compressed": true
+    },
+    {
+      "name": "DeFiCreditScore_final.zkey",
+      "originalSize": 694842,
+      "compressedSize": 444097,
+      "compressionRatio": "36.1",
+      "checksum": "01cd8e438d971453f31a5c88727bdcae2b689529e7f144cef41852e97cec39c1",
+      "compressed": true
+    },
+    {
+      "name": "verification_key.json",
+      "originalSize": 4753,
+      "compressedSize": 4753,
+      "compressionRatio": 0,
+      "checksum": "0cca161702e6af36db9df2dd1ba31c2c6763728dff69bf8deb63139ef4f0551b",
+      "compressed": false
+    }
+  ],
+  "uploadInstructions": {
+    "note": "Upload these files to your CDN with the following configuration",
+    "files": [
+      {
+        "file": "DeFiCreditScore.wasm.gz",
+        "size": "957.69 KB",
+        "checksum": "e36fe4a49208cccb90087e51945744de092e7a46ec7359f0e1c1133293471c38"
+      },
+      {
+        "file": "DeFiCreditScore_final.zkey.gz",
+        "size": "433.69 KB",
+        "checksum": "01cd8e438d971453f31a5c88727bdcae2b689529e7f144cef41852e97cec39c1"
+      },
+      {
+        "file": "verification_key.json",
+        "size": "4.64 KB",
+        "checksum": "0cca161702e6af36db9df2dd1ba31c2c6763728dff69bf8deb63139ef4f0551b"
+      }
+    ],
+    "cdnConfiguration": {
+      "cors": {
+        "enabled": true,
+        "allowOrigins": [
+          "*"
+        ],
+        "allowMethods": [
+          "GET",
+          "HEAD"
+        ],
+        "allowHeaders": [
+          "Content-Type",
+          "Range"
+        ],
+        "exposeHeaders": [
+          "Content-Length",
+          "Content-Range"
+        ]
+      },
+      "caching": {
+        "maxAge": 31536000,
+        "immutable": true
+      },
+      "compression": {
+        "gzip": true,
+        "contentEncoding": "gzip"
+      },
+      "security": {
+        "https": true,
+        "hsts": true
+      }
+    }
+  },
+  "environmentVariables": {
+    "backend": {
+      "CIRCUIT_WASM_URL": "https://cdn.yourdomain.com/circuits/DeFiCreditScore.wasm",
+      "CIRCUIT_ZKEY_URL": "https://cdn.yourdomain.com/circuits/DeFiCreditScore_final.zkey",
+      "VERIFICATION_KEY_URL": "https://cdn.yourdomain.com/circuits/verification_key.json"
+    },
+    "frontend": {
+      "VITE_CIRCUIT_WASM_URL": "https://cdn.yourdomain.com/circuits/DeFiCreditScore.wasm",
+      "VITE_PROVING_KEY_URL": "https://cdn.yourdomain.com/circuits/DeFiCreditScore_final.zkey"
+    }
+  }
+}

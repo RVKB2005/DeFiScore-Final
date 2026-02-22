@@ -6,14 +6,15 @@ export interface Asset {
   icon: string;
   price: number;
   priceChange24h: number;
+  priceChange7d?: number;
   marketCap: number;
   volume24h: number;
   circulatingSupply: number;
   totalSupply: number;
   sparklineData: number[];
   apy?: number;
-  supplyApy?: number;
-  borrowApy?: number;
+  supplyApy?: number | null;
+  borrowApy?: number | null;
 }
 
 export interface WalletAsset {

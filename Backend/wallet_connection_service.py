@@ -58,22 +58,28 @@ class WalletConnectionService:
         """
         Create WalletConnect session
         
+        NOTE: This implementation requires WalletConnect SDK integration on the frontend.
+        The backend provides the session structure, but actual WalletConnect protocol
+        handling (encryption, bridge communication) must be implemented client-side.
+        
         Returns:
-            Connection response with QR code and deep link
+            Connection response with session ID for frontend WalletConnect initialization
         """
         session_id = str(uuid.uuid4())
         
-        # WalletConnect URI format
-        # In production, this would use actual WalletConnect SDK
-        wc_uri = f"wc:{session_id}@1?bridge=https://bridge.walletconnect.org&key=..."
-        
-        qr_code = self.generate_qr_code(wc_uri)
+        # Frontend should use this session_id to initialize WalletConnect SDK
+        # with proper bridge URL and encryption keys
+        # Example frontend implementation:
+        # const connector = new WalletConnect({
+        #   bridge: "https://bridge.walletconnect.org",
+        #   clientMeta: { ... }
+        # });
         
         return WalletConnectionResponse(
             wallet_type=WalletType.WALLETCONNECT,
-            connection_method="qr_code",
-            qr_code_data=qr_code,
-            deep_link=wc_uri,
+            connection_method="sdk_required",
+            qr_code_data=None,
+            deep_link=None,
             session_id=session_id
         )
     

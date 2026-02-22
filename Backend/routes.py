@@ -10,6 +10,9 @@ from auth_service import AuthService
 from dependencies import get_current_wallet, get_optional_wallet
 from wallet_utils import WalletUtils
 from typing import Optional
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
@@ -77,6 +80,7 @@ async def verify_signature(request: VerifyRequest):
         )
         
         if not success:
+            logger.warning(f"Signature verification failed for {request.address}: {error}")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail=error or "Authentication failed"
@@ -87,9 +91,10 @@ async def verify_signature(request: VerifyRequest):
     except HTTPException:
         raise
     except Exception as e:
+        logger.error(f"Verification error for {request.address}: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Verification failed"
+            detail=f"Verification failed: {str(e)}"
         )
 
 

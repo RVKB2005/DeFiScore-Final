@@ -57,7 +57,7 @@ export function Modal({
             >
               {/* Header */}
               {(title || showClose) && (
-                <div className="flex items-center justify-between p-4 sm:p-6 pb-0">
+                <div className="flex items-center justify-between px-4 sm:px-6 pt-4 sm:pt-6">
                   {title && (
                     <h2 className="text-lg sm:text-xl font-semibold">{title}</h2>
                   )}
@@ -75,7 +75,7 @@ export function Modal({
               )}
 
               {/* Content */}
-              <div className="p-4 sm:p-6">{children}</div>
+              <div className="px-4 sm:px-6 pb-4 sm:pb-6 pt-3">{children}</div>
             </motion.div>
           </div>
         </>

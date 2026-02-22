@@ -141,6 +141,11 @@
     @apply bg-background text-foreground font-sans antialiased;
     font-family: 'Inter', sans-serif;
     min-height: 100vh;
+    overscroll-behavior: none;
+  }
+  
+  html {
+    overscroll-behavior: none;
   }
 
   .dark body,

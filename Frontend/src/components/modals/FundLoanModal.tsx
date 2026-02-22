@@ -1,0 +1,186 @@
+import { useState, useEffect } from 'react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Loader2, CheckCircle2, ExternalLink } from 'lucide-react';
+import { apiService } from '@/services/apiService';
+import { blockchainService } from '@/services/blockchainService';
+import { useWallet } from '@/hooks/useWallet';
+import { toast } from 'sonner';
+
+interface FundLoanModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  loanId: string;
+  onSuccess?: () => void;
+}
+
+export function FundLoanModal({ isOpen, onClose, loanId, onSuccess }: FundLoanModalProps) {
+  const { token } = useWallet();
+  const [loading, setLoading] = useState(false);
+  const [instructions, setInstructions] = useState<any>(null);
+  const [step, setStep] = useState<'loading' | 'ready' | 'funding' | 'confirming' | 'success'>('loading');
+  const [txHash, setTxHash] = useState<string>('');
+
+  useEffect(() => {
+    if (isOpen && token) {
+      loadInstructions();
+    }
+  }, [isOpen, loanId, token]);
+
+  const loadInstructions = async () => {
+    try {
+      setStep('loading');
+      const data = await apiService.getFundingInstructions(token!, loanId);
+      setInstructions(data);
+      setStep('ready');
+    } catch (error: any) {
+      toast.error(error.message);
+      onClose();
+    }
+  };
+
+  const handleFund = async () => {
+    if (!instructions) return;
+
+    try {
+      setStep('funding');
+      setLoading(true);
+
+      // Fund loan via blockchain service
+      const result = await blockchainService.fundLoan(
+        loanId,
+        instructions.loan_token,
+        instructions.loan_amount.toString()
+      );
+
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to fund loan');
+      }
+
+      setTxHash(result.txHash || '');
+      setStep('confirming');
+
+      // Confirm with backend
+      await apiService.confirmLoanFunded(token!, loanId);
+
+      setStep('success');
+      toast.success('Loan funded successfully!');
+      
+      if (onSuccess) {
+        onSuccess();
+      }
+    } catch (error: any) {
+      console.error('Failed to fund loan:', error);
+      toast.error(error.message || 'Failed to fund loan');
+      setStep('ready');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <Dialog open={isOpen} onOpenChange={onClose}>
+      <DialogContent className="sm:max-w-[500px]">
+        <DialogHeader>
+          <DialogTitle>Fund Loan</DialogTitle>
+          <DialogDescription>
+            Transfer loan amount to the borrower
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4">
+          {step === 'loading' && (
+            <div className="flex items-center justify-center py-8">
+              <Loader2 className="h-8 w-8 animate-spin text-primary" />
+            </div>
+          )}
+
+          {step === 'ready' && instructions && (
+            <>
+              <Alert>
+                <AlertDescription>
+                  <div className="space-y-2">
+                    <p className="font-medium">Loan Details:</p>
+                    <div className="text-sm space-y-1">
+                      <p>Amount: {instructions.loan_amount} tokens</p>
+                      <p>Token: {instructions.loan_token}</p>
+                      <p>Lender: {instructions.lender}</p>
+                    </div>
+                  </div>
+                </AlertDescription>
+              </Alert>
+
+              <div className="bg-muted p-4 rounded-lg space-y-2">
+                <p className="text-sm font-medium">Steps:</p>
+                <ol className="text-sm space-y-1 list-decimal list-inside">
+                  {instructions.instructions.instructions.map((instruction: string, index: number) => (
+                    <li key={index}>{instruction}</li>
+                  ))}
+                </ol>
+              </div>
+
+              <Button onClick={handleFund} disabled={loading} className="w-full">
+                {loading ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Funding...
+                  </>
+                ) : (
+                  'Fund Loan'
+                )}
+              </Button>
+            </>
+          )}
+
+          {step === 'funding' && (
+            <div className="flex flex-col items-center justify-center py-8 space-y-4">
+              <Loader2 className="h-12 w-12 animate-spin text-primary" />
+              <p className="text-sm text-muted-foreground">Processing transaction...</p>
+            </div>
+          )}
+
+          {step === 'confirming' && (
+            <div className="flex flex-col items-center justify-center py-8 space-y-4">
+              <Loader2 className="h-12 w-12 animate-spin text-primary" />
+              <p className="text-sm text-muted-foreground">Confirming on blockchain...</p>
+              {txHash && (
+                <a
+                  href={`https://etherscan.io/tx/${txHash}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-xs text-primary flex items-center gap-1"
+                >
+                  View transaction <ExternalLink className="h-3 w-3" />
+                </a>
+              )}
+            </div>
+          )}
+
+          {step === 'success' && (
+            <div className="flex flex-col items-center justify-center py-8 space-y-4">
+              <CheckCircle2 className="h-12 w-12 text-green-500" />
+              <p className="font-medium">Loan Funded!</p>
+              <p className="text-sm text-muted-foreground text-center">
+                The loan has been transferred to the borrower. The loan is now active.
+              </p>
+              {txHash && (
+                <a
+                  href={`https://etherscan.io/tx/${txHash}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-xs text-primary flex items-center gap-1"
+                >
+                  View transaction <ExternalLink className="h-3 w-3" />
+                </a>
+              )}
+              <Button onClick={onClose} className="w-full">
+                Close
+              </Button>
+            </div>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}

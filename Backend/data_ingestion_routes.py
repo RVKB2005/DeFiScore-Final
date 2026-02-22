@@ -26,13 +26,19 @@ wallet_service = WalletConnectionService(base_url=settings.BASE_URL)
 
 
 def get_blockchain_client():
-    """Dependency for blockchain client (single chain)"""
-    return BlockchainClient(settings.ETHEREUM_MAINNET_RPC)
+    """Dependency for blockchain client (Polygon Amoy testnet)"""
+    return BlockchainClient(settings.POLYGON_AMOY_RPC)
 
 
 def get_ingestion_service(client: BlockchainClient = Depends(get_blockchain_client)):
     """Dependency for ingestion service (single chain)"""
-    return DataIngestionService(client)
+    from config import settings
+    return DataIngestionService(
+        client, 
+        network="polygon_amoy", 
+        chain_id=80002,
+        etherscan_api_key=settings.ETHERSCAN_API_KEY
+    )
 
 
 def get_multi_chain_service(
@@ -72,7 +78,7 @@ async def ingest_wallet_data(
     current_wallet: str = Depends(get_current_wallet)
 ):
     """
-    Ingest blockchain data for a wallet (SINGLE CHAIN - Ethereum Mainnet)
+    Ingest blockchain data for a wallet (Polygon Amoy Testnet)
     
     This endpoint triggers data collection for credit scoring.
     
@@ -224,7 +230,7 @@ async def get_wallet_metadata(
     ingestion_service: DataIngestionService = Depends(get_ingestion_service)
 ):
     """
-    Get current wallet metadata (SINGLE CHAIN - Ethereum Mainnet)
+    Get current wallet metadata (Polygon Amoy Testnet)
     
     Returns basic wallet information without full ingestion
     """
@@ -243,7 +249,7 @@ async def get_protocol_events(
     ingestion_service: DataIngestionService = Depends(get_ingestion_service)
 ):
     """
-    Get protocol interaction events for wallet (SINGLE CHAIN - Ethereum Mainnet)
+    Get protocol interaction events for wallet (Polygon Amoy Testnet)
     
     Returns DeFi protocol interactions (Aave, Compound, etc.)
     """
@@ -288,7 +294,7 @@ async def health_check(client: BlockchainClient = Depends(get_blockchain_client)
     """
     Health check for data ingestion service
     
-    Verifies blockchain connection (Ethereum Mainnet)
+    Verifies blockchain connection (Polygon Amoy Testnet)
     """
     try:
         is_connected = client.is_connected()

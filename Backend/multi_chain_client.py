@@ -110,29 +110,36 @@ class MultiChainClient:
         "aurora": {"name": "Aurora", "chain_id": 1313161554, "type": "mainnet"},
     }
     
-    def __init__(self, networks: Optional[List[str]] = None, mainnet_only: bool = False):
+    def __init__(self, networks: Optional[List[str]] = None, mainnet_only: bool = False, lazy_init: bool = True):
         """
         Initialize multi-chain client
         
         Args:
             networks: List of network names to connect to (None = all networks)
             mainnet_only: If True, only connect to mainnet networks
+            lazy_init: If True, only initialize networks when first accessed (default: True)
         """
         self.clients: Dict[str, BlockchainClient] = {}
         self.connection_status: Dict[str, bool] = {}
+        self.lazy_init = lazy_init
+        self.mainnet_only = mainnet_only
+        self.specified_networks = networks
         
-        # Determine which networks to connect to
+        # Determine which networks are available
         if mainnet_only:
-            network_configs = settings.get_mainnet_networks()
+            self.available_networks = settings.get_mainnet_networks()
         else:
-            network_configs = settings.get_all_networks()
+            self.available_networks = settings.get_all_networks()
         
         # Filter by specified networks if provided
         if networks:
-            network_configs = {k: v for k, v in network_configs.items() if k in networks}
+            self.available_networks = {k: v for k, v in self.available_networks.items() if k in networks}
         
-        # Initialize clients
-        self._initialize_clients(network_configs)
+        # Initialize clients immediately if not lazy
+        if not lazy_init:
+            self._initialize_clients(self.available_networks)
+        else:
+            logger.info(f"Multi-chain client initialized with lazy loading for {len(self.available_networks)} networks")
     
     def _initialize_clients(self, network_configs: Dict[str, str]):
         """Initialize blockchain clients for each network"""
@@ -144,13 +151,50 @@ class MultiChainClient:
                 if client.is_connected():
                     self.clients[network_name] = client
                     self.connection_status[network_name] = True
-                    logger.info(f"✓ Connected to {self.NETWORK_INFO[network_name]['name']}")
+                    logger.debug(f"✓ Connected to {self.NETWORK_INFO[network_name]['name']}")
                 else:
                     self.connection_status[network_name] = False
                     logger.warning(f"✗ Failed to connect to {network_name}")
             except Exception as e:
                 self.connection_status[network_name] = False
                 logger.error(f"✗ Error connecting to {network_name}: {e}")
+    
+    def _ensure_network_initialized(self, network: str) -> bool:
+        """
+        Ensure a specific network is initialized (lazy initialization)
+        
+        Args:
+            network: Network name to initialize
+            
+        Returns:
+            True if network is connected, False otherwise
+        """
+        # Already initialized
+        if network in self.clients:
+            return self.connection_status.get(network, False)
+        
+        # Network not available
+        if network not in self.available_networks:
+            logger.warning(f"Network {network} not available")
+            return False
+        
+        # Initialize this network
+        rpc_url = self.available_networks[network]
+        try:
+            client = BlockchainClient(rpc_url)
+            if client.is_connected():
+                self.clients[network] = client
+                self.connection_status[network] = True
+                logger.debug(f"✓ Lazy-loaded {self.NETWORK_INFO[network]['name']}")
+                return True
+            else:
+                self.connection_status[network] = False
+                logger.warning(f"✗ Failed to connect to {network}")
+                return False
+        except Exception as e:
+            self.connection_status[network] = False
+            logger.error(f"✗ Error connecting to {network}: {e}")
+            return False
     
     def get_connected_networks(self) -> List[str]:
         """Get list of successfully connected networks"""
@@ -242,10 +286,8 @@ class MultiChainClient:
                     "status": "success"
                 }
             except Exception as e:
-                # Silently handle errors
-                error_str = str(e)
-                if "Unknown format" not in error_str:
-                    logger.error(f"Error fetching metadata on {network}: {e}")
+                # Log all errors for debugging
+                logger.error(f"Error fetching metadata on {network}: {e}")
                 return network, {
                     "network": self.NETWORK_INFO[network]["name"],
                     "chain_id": self.NETWORK_INFO[network]["chain_id"],
@@ -318,7 +360,9 @@ class MultiChainClient:
         return total_usd
     
     def get_client(self, network: str) -> Optional[BlockchainClient]:
-        """Get blockchain client for specific network"""
+        """Get blockchain client for specific network (with lazy initialization)"""
+        if self.lazy_init:
+            self._ensure_network_initialized(network)
         return self.clients.get(network)
     
     def get_connection_summary(self) -> Dict[str, Any]:

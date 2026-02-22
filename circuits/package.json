@@ -1,0 +1,21 @@
+{
+  "name": "defiscore-zk-circuits",
+  "version": "1.0.0",
+  "description": "Zero-knowledge circuits for DeFi credit score verification",
+  "scripts": {
+    "compile": "node scripts/compile-circuit.js",
+    "setup": "node scripts/trusted-setup.js",
+    "test-proof": "node scripts/test-proof.js",
+    "generate-verifier": "node scripts/generate-verifier.js",
+    "full-build": "npm run compile && npm run setup && npm run test-proof && npm run generate-verifier",
+    "test-circuit": "node scripts/test-circuit.js"
+  },
+  "dependencies": {
+    "circomlib": "^2.0.5",
+    "circomlibjs": "^0.1.7",
+    "snarkjs": "^0.7.0"
+  },
+  "devDependencies": {
+    "circom_tester": "^0.0.19"
+  }
+}

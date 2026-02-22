@@ -68,23 +68,4 @@ class JWTHandler:
         except JWTError:
             return None
     
-    @staticmethod
-    def decode_token(token: str) -> Optional[dict]:
-        """
-        Decode JWT token without verification (for debugging)
-        
-        Args:
-            token: JWT token string
-        
-        Returns:
-            Decoded payload or None
-        """
-        try:
-            payload = jwt.decode(
-                token,
-                settings.SECRET_KEY,
-                algorithms=[settings.ALGORITHM]
-            )
-            return payload
-        except JWTError:
-            return None
+

@@ -14,6 +14,7 @@ from feature_extraction_models import (
 )
 from multi_chain_ingestion_service import MultiChainIngestionService
 from data_ingestion_service import DataIngestionService
+from price_oracle_service import price_oracle
 
 logger = logging.getLogger(__name__)
 
@@ -57,14 +58,16 @@ class MultiChainFeatureService:
             # Get ingestion service for network
             ingestion_svc = self.ingestion_service.ingestion_services.get(network)
             if not ingestion_svc:
-                logger.error(f"No ingestion service for network: {network}")
-                return None
+                error_msg = f"No ingestion service configured for network: {network}"
+                logger.error(error_msg)
+                raise ValueError(error_msg)
             
             # Get network info
             network_info = self.ingestion_service.multi_client.NETWORK_INFO.get(network)
             if not network_info:
-                logger.error(f"No network info for: {network}")
-                return None
+                error_msg = f"Network not supported: {network}"
+                logger.error(error_msg)
+                raise ValueError(error_msg)
             
             chain_id = network_info["chain_id"]
             
@@ -77,7 +80,7 @@ class MultiChainFeatureService:
             # Fetch data
             transactions = ingestion_svc.fetch_transaction_history(wallet_address, window)
             protocol_events = ingestion_svc.fetch_protocol_events(wallet_address, window)
-            snapshots = ingestion_svc.create_balance_snapshots(wallet_address, window, snapshot_count=10)
+            snapshots = ingestion_svc.create_balance_snapshots(wallet_address, window, transactions, snapshot_count=30)
             
             # Extract features
             features = self.feature_service.extract_features(
@@ -94,14 +97,13 @@ class MultiChainFeatureService:
             return features
             
         except Exception as e:
-            # Silently handle POA chain errors
             error_str = str(e)
             if "extraData" in error_str and "POA" in error_str:
-                # POA chain error - already handled with middleware
-                pass
+                logger.error(f"POA chain configuration error for {network}: {e}")
+                logger.error("Please ensure POA middleware is properly configured for this network")
             else:
-                logger.error(f"Feature extraction failed for {network}: {e}")
-            return None
+                logger.error(f"Feature extraction failed for {network}: {e}", exc_info=True)
+            raise RuntimeError(f"Feature extraction failed for {network}: {e}") from e
     
     def extract_features_all_networks(
         self,
@@ -120,28 +122,40 @@ class MultiChainFeatureService:
         Returns:
             MultiChainFeatureVector with aggregated features
         """
-        logger.info(f"Extracting features for {wallet_address} across all networks")
+        logger.info(f"========== MULTI-CHAIN FEATURE EXTRACTION STARTED ==========")
+        logger.info(f"Wallet: {wallet_address}")
+        logger.info(f"Window: {window_days} days, Parallel: {parallel}")
         start_time = datetime.utcnow()
         
         # Get active networks
+        logger.info(f"Checking active networks...")
         active_networks = self.ingestion_service.multi_client.get_active_networks(wallet_address)
-        logger.info(f"Wallet active on {len(active_networks)} networks")
+        logger.info(f"✓ Wallet active on {len(active_networks)} networks: {active_networks}")
         
         # Extract features per network
         network_features = {}
         
         if parallel and len(active_networks) > 1:
+            logger.info(f"Starting PARALLEL feature extraction across {len(active_networks)} networks...")
             network_features = self._extract_parallel(wallet_address, active_networks, window_days)
         else:
+            logger.info(f"Starting SEQUENTIAL feature extraction across {len(active_networks)} networks...")
             network_features = self._extract_sequential(wallet_address, active_networks, window_days)
         
+        logger.info(f"✓ Feature extraction completed for {len(network_features)} networks")
+        
         # Aggregate features
+        logger.info(f"Aggregating features across networks...")
         aggregated = self._aggregate_features(wallet_address, network_features)
         
         end_time = datetime.utcnow()
         duration = (end_time - start_time).total_seconds()
         
-        logger.info(f"Multi-chain feature extraction completed in {duration:.2f}s")
+        logger.info(f"========== MULTI-CHAIN FEATURE EXTRACTION COMPLETED ==========")
+        logger.info(f"Duration: {duration:.2f}s")
+        logger.info(f"Total transactions: {aggregated.total_transactions_all_chains}")
+        logger.info(f"Total protocol interactions: {aggregated.total_protocol_interactions}")
+        logger.info(f"Overall classification: {aggregated.overall_classification.dict()}")
         
         return aggregated
     
@@ -156,10 +170,12 @@ class MultiChainFeatureService:
         
         def extract_network(network: str):
             try:
+                logger.info(f"[{network}] Starting feature extraction...")
                 features = self.extract_features_single_network(wallet_address, network, window_days)
+                logger.info(f"[{network}] ✓ Features extracted: {features.activity.total_transactions} txs, {features.protocol.total_protocol_events} events")
                 return network, features
             except Exception as e:
-                logger.error(f"Parallel extraction failed for {network}: {e}")
+                logger.error(f"[{network}] ✗ Feature extraction failed: {e}")
                 return network, None
         
         with ThreadPoolExecutor(max_workers=5) as executor:
@@ -184,14 +200,15 @@ class MultiChainFeatureService:
         """Extract features sequentially"""
         results = {}
         
-        for network in networks:
+        for i, network in enumerate(networks, 1):
             try:
+                logger.info(f"[{network}] ({i}/{len(networks)}) Starting feature extraction...")
                 features = self.extract_features_single_network(wallet_address, network, window_days)
                 if features:
                     results[network] = features
-                    logger.info(f"✓ Extracted features for {network}")
+                    logger.info(f"[{network}] ✓ Completed: {features.activity.total_transactions} txs, {features.protocol.total_protocol_events} events")
             except Exception as e:
-                logger.error(f"✗ Feature extraction failed for {network}: {e}")
+                logger.error(f"[{network}] ✗ Failed: {e}")
         
         return results
     
@@ -204,7 +221,7 @@ class MultiChainFeatureService:
         
         # Aggregate totals
         total_transactions = sum(f.activity.total_transactions for f in network_features.values())
-        total_value_usd = 0.0  # Would need price conversion
+        total_value_usd = self._calculate_total_value_usd(network_features)
         active_networks = len(network_features)
         total_protocol_interactions = sum(f.protocol.total_protocol_events for f in network_features.values())
         total_liquidations = sum(f.protocol.liquidation_count for f in network_features.values())
@@ -303,3 +320,102 @@ class MultiChainFeatureService:
         except Exception as e:
             logger.error(f"Failed to get feature summary: {e}")
             raise
+
+    def _calculate_total_value_usd(self, network_features: Dict[str, FeatureVector]) -> float:
+        """
+        Calculate total portfolio value in USD across all networks
+        
+        Uses price oracle to convert native token balances to USD
+        
+        Args:
+            network_features: Dictionary of network -> FeatureVector
+            
+        Returns:
+            Total value in USD
+        """
+        total_usd = 0.0
+        
+        # Network to native token mapping
+        network_tokens = {
+            "ethereum": "ETH",
+            "polygon": "MATIC",
+            "arbitrum": "ETH",
+            "optimism": "ETH",
+            "base": "ETH",
+            "zksync": "ETH",
+            "scroll": "ETH",
+            "linea": "ETH",
+            "blast": "ETH",
+            "mantle": "MNT",
+            "metis": "METIS",
+            "mode": "ETH",
+            "bnb": "BNB",
+            "opbnb": "BNB",
+            "avalanche": "AVAX",
+            "fantom": "FTM",
+            "gnosis": "xDAI",
+            "moonbeam": "GLMR",
+            "moonriver": "MOVR",
+            "astar": "ASTR",
+            "cronos": "CRO",
+            "kava": "KAVA",
+            "fuse": "FUSE",
+            "harmony": "ONE",
+            "aurora": "ETH",
+            "celo": "CELO",
+            "boba": "ETH",
+            "zora": "ETH",
+            "worldchain": "WLD",
+            "unichain": "UNI",
+            "shape": "ETH",
+            "ink": "ETH",
+            "soneium": "ETH",
+            "story": "IP",
+            "animechain": "ANIME",
+            "degen": "DEGEN",
+            "ronin": "RON",
+            "frax": "FRAX",
+            "hyperliquid": "HYPE",
+            "berachain": "BERA",
+            "monad": "MONAD",
+        }
+        
+        try:
+            # Collect all unique tokens
+            tokens_to_fetch = set()
+            network_balances = {}
+            
+            for network, features in network_features.items():
+                token = network_tokens.get(network, "ETH")
+                balance = features.financial.current_balance_eth
+                
+                if balance > 0:
+                    tokens_to_fetch.add(token)
+                    if token not in network_balances:
+                        network_balances[token] = 0.0
+                    network_balances[token] += balance
+            
+            if not tokens_to_fetch:
+                return 0.0
+            
+            # Fetch prices in batch
+            logger.info(f"Fetching prices for {len(tokens_to_fetch)} tokens...")
+            prices = price_oracle.get_prices_batch(list(tokens_to_fetch))
+            
+            # Calculate total USD value
+            for token, balance in network_balances.items():
+                price = prices.get(token)
+                if price:
+                    usd_value = balance * price
+                    total_usd += usd_value
+                    logger.debug(f"{token}: {balance:.4f} × ${price:.2f} = ${usd_value:.2f}")
+                else:
+                    logger.warning(f"No price found for {token}, skipping")
+            
+            logger.info(f"Total portfolio value: ${total_usd:,.2f} USD")
+            return round(total_usd, 2)
+            
+        except Exception as e:
+            logger.error(f"Failed to calculate USD value: {e}")
+            # Return 0 on error, don't fail the entire feature extraction
+            return 0.0

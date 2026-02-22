@@ -10,23 +10,23 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 
 const creditFactors = [
   {
-    name: 'Payment History',
+    name: 'Transaction History',
     icon: Clock,
   },
   {
-    name: 'Credit Utilization',
+    name: 'Protocol Usage',
     icon: CreditCard,
   },
   {
-    name: 'Credit Age',
+    name: 'Wallet Age',
     icon: History,
   },
   {
-    name: 'Account Mix',
+    name: 'Asset Diversity',
     icon: Layers,
   },
   {
-    name: 'Hard Inquiries',
+    name: 'Liquidation Risk',
     icon: Search,
   },
 ];

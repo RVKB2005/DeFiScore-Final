@@ -1,136 +1,151 @@
 import { useState } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { Lock, Eye, EyeOff } from 'lucide-react';
+import { motion } from 'framer-motion';
+import { Shield, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Modal } from '@/components/modals/Modal';
+import { useWallet } from '@/hooks/useWallet';
+import { walletConnector } from '@/services/walletConnector';
+import { toast } from 'sonner';
 
 interface PasswordModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onUnlock: () => void;
+  onUnlock: (signature: string) => void;
 }
 
-// Sample password for testing: "demo123"
-const SAMPLE_PASSWORD = 'demo123';
-
 export function PasswordModal({ isOpen, onClose, onUnlock }: PasswordModalProps) {
-  const [password, setPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
-  const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const { address } = useWallet();
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError('');
+  const handleSignature = async () => {
     setIsLoading(true);
 
-    // Simulate verification delay
-    await new Promise((resolve) => setTimeout(resolve, 1000));
+    try {
+      // Get the saved wallet type to use the correct wallet
+      const savedWalletType = localStorage.getItem('defi_wallet_type') as 'metamask' | 'coinbase' | null;
+      
+      if (!savedWalletType) {
+        throw new Error('Wallet type not found. Please reconnect your wallet.');
+      }
 
-    if (password === SAMPLE_PASSWORD) {
-      onUnlock();
-      setPassword('');
+      // Create a message to sign
+      const message = `I authorize viewing my DeFi credit score.\n\nWallet: ${address}\nTimestamp: ${new Date().toISOString()}\n\nThis signature proves I own this wallet and authorizes decryption of my credit score data.`;
+
+      // Request signature from the CORRECT wallet (MetaMask or Coinbase)
+      toast.loading('Please sign the message in your wallet...', { id: 'signature' });
+      
+      let connection;
+      if (savedWalletType === 'metamask') {
+        connection = await walletConnector.connectMetaMask();
+      } else if (savedWalletType === 'coinbase') {
+        connection = await walletConnector.connectCoinbase();
+      } else {
+        throw new Error('Unsupported wallet type');
+      }
+
+      const signature = await walletConnector.signMessage(connection.signer, message);
+
+      toast.success('Signature verified!', { id: 'signature' });
+      
+      // Pass signature to parent component
+      onUnlock(signature);
       onClose();
-    } else {
-      setError('Invalid password. Please try again.');
+    } catch (error: any) {
+      console.error('Signature error:', error);
+      
+      if (error.message.includes('User rejected') || error.code === 4001 || error.code === 'ACTION_REJECTED') {
+        toast.error('Signature cancelled', { id: 'signature' });
+      } else {
+        toast.error('Failed to sign message: ' + error.message, { id: 'signature' });
+      }
+    } finally {
+      setIsLoading(false);
     }
-    setIsLoading(false);
   };
 
   const handleClose = () => {
-    setPassword('');
-    setError('');
-    onClose();
+    if (!isLoading) {
+      onClose();
+    }
   };
 
   return (
     <Modal isOpen={isOpen} onClose={handleClose} size="md">
       <div className="text-center space-y-6">
-        {/* Lock Icon */}
+        {/* Shield Icon */}
         <motion.div
           initial={{ scale: 0 }}
           animate={{ scale: 1 }}
           transition={{ delay: 0.1, type: 'spring', stiffness: 200 }}
           className="w-16 h-16 mx-auto rounded-2xl bg-primary/20 flex items-center justify-center"
         >
-          <Lock className="w-8 h-8 text-primary" />
+          <Shield className="w-8 h-8 text-primary" />
         </motion.div>
 
         {/* Title */}
         <div className="space-y-2">
           <h1 className="text-2xl font-bold text-foreground">
-            Enter Your Private Password
+            Verify Wallet Ownership
           </h1>
           <p className="text-muted-foreground text-sm">
-            Your credit score is encrypted on-chain. Provide your master password to decrypt and view your profile.
+            Sign a message with your wallet to prove ownership and decrypt your credit score. This is free and doesn't require any gas fees.
           </p>
         </div>
 
-        {/* Form */}
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="space-y-2 text-left">
-            <label className="text-sm font-medium text-foreground">
-              Private Password
-            </label>
-            <div className="relative">
-              <Input
-                type={showPassword ? 'text' : 'password'}
-                placeholder="Enter password..."
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="pr-10 bg-muted/30 border-border/50"
-              />
-              <button
-                type="button"
-                onClick={() => setShowPassword(!showPassword)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
-              >
-                {showPassword ? (
-                  <EyeOff className="w-5 h-5" />
-                ) : (
-                  <Eye className="w-5 h-5" />
-                )}
-              </button>
-            </div>
-            {error && (
-              <motion.p
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                className="text-sm text-destructive"
-              >
-                {error}
-              </motion.p>
-            )}
-          </div>
+        {/* Wallet Info */}
+        <div className="p-4 rounded-xl bg-muted/30 border border-border/50 space-y-2">
+          <p className="text-xs text-muted-foreground uppercase tracking-wider">
+            Wallet Address
+          </p>
+          <p className="text-sm font-mono text-foreground break-all">
+            {address}
+          </p>
+        </div>
 
-          <Button
-            type="submit"
-            variant="glow"
-            className="w-full"
-            disabled={isLoading || !password}
-          >
-            {isLoading ? (
-              <motion.div
-                animate={{ rotate: 360 }}
-                transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
-                className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full"
-              />
-            ) : (
-              'Unlock Score'
-            )}
-          </Button>
-        </form>
-
-        {/* Footer Links */}
-        <div className="space-y-3">
-          <button className="text-primary text-sm hover:underline">
-            Forgot your password?
-          </button>
-          <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
-            <span className="w-2 h-2 rounded-full bg-success animate-pulse" />
-            Secure End-to-End Encryption
+        {/* Security Info */}
+        <div className="space-y-3 text-left">
+          <div className="flex items-start gap-2 text-xs text-muted-foreground">
+            <div className="w-1 h-1 rounded-full bg-success mt-1.5" />
+            <p>Signing proves you own this wallet without exposing your private key</p>
           </div>
+          <div className="flex items-start gap-2 text-xs text-muted-foreground">
+            <div className="w-1 h-1 rounded-full bg-success mt-1.5" />
+            <p>No transaction or gas fees required</p>
+          </div>
+          <div className="flex items-start gap-2 text-xs text-muted-foreground">
+            <div className="w-1 h-1 rounded-full bg-success mt-1.5" />
+            <p>Your credit score is encrypted and only viewable by you</p>
+          </div>
+          <div className="flex items-start gap-2 text-xs text-muted-foreground">
+            <div className="w-1 h-1 rounded-full bg-success mt-1.5" />
+            <p>Rate limited to prevent unauthorized access attempts</p>
+          </div>
+        </div>
+
+        {/* Action Button */}
+        <Button
+          onClick={handleSignature}
+          variant="glow"
+          className="w-full"
+          disabled={isLoading}
+        >
+          {isLoading ? (
+            <>
+              <Loader2 className="w-5 h-5 mr-2 animate-spin" />
+              Waiting for signature...
+            </>
+          ) : (
+            <>
+              <Shield className="w-5 h-5 mr-2" />
+              Sign Message to View Score
+            </>
+          )}
+        </Button>
+
+        {/* Footer */}
+        <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground pt-2 border-t">
+          <span className="w-2 h-2 rounded-full bg-success animate-pulse" />
+          Secure Cryptographic Verification
         </div>
       </div>
     </Modal>

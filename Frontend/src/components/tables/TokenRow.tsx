@@ -1,4 +1,3 @@
-import { motion } from 'framer-motion';
 import { TrendingUp, TrendingDown } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { cn } from '@/lib/utils';
@@ -17,7 +16,7 @@ export function TokenRow({ asset, index, showSparkline = true }: TokenRowProps) 
 
   // Simple sparkline visualization
   const renderSparkline = () => {
-    if (!showSparkline || !asset.sparklineData.length) return null;
+    if (!showSparkline || !asset.sparklineData || asset.sparklineData.length === 0) return null;
 
     const min = Math.min(...asset.sparklineData);
     const max = Math.max(...asset.sparklineData);
@@ -46,12 +45,7 @@ export function TokenRow({ asset, index, showSparkline = true }: TokenRowProps) 
   };
 
   return (
-    <motion.tr
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ delay: index * 0.02 }}
-      className="border-b border-border/50 hover:bg-muted/30 transition-colors"
-    >
+    <tr className="border-b border-border/50 hover:bg-muted/30 transition-colors">
       {/* Rank */}
       <td className="px-4 py-4 text-muted-foreground">{index + 1}</td>
 
@@ -61,8 +55,25 @@ export function TokenRow({ asset, index, showSparkline = true }: TokenRowProps) 
           to={`/asset/${asset.symbol.toLowerCase()}`}
           className="flex items-center gap-3 hover:text-primary transition-colors"
         >
-          <div className="w-10 h-10 rounded-full bg-gradient-to-br from-primary/20 to-secondary/20 flex items-center justify-center text-lg">
-            {asset.icon}
+          {asset.icon && asset.icon.startsWith('http') ? (
+            <img 
+              src={asset.icon} 
+              alt={asset.name}
+              className="w-10 h-10 rounded-full"
+              onError={(e) => {
+                // Fallback to gradient circle if image fails to load
+                e.currentTarget.style.display = 'none';
+                e.currentTarget.nextElementSibling?.classList.remove('hidden');
+              }}
+            />
+          ) : null}
+          <div 
+            className={cn(
+              "w-10 h-10 rounded-full bg-gradient-to-br from-primary/20 to-secondary/20 flex items-center justify-center text-lg",
+              asset.icon && asset.icon.startsWith('http') ? 'hidden' : ''
+            )}
+          >
+            {!asset.icon || !asset.icon.startsWith('http') ? asset.icon || asset.symbol.charAt(0) : ''}
           </div>
           <div>
             <p className="font-semibold">{asset.name}</p>
@@ -92,17 +103,19 @@ export function TokenRow({ asset, index, showSparkline = true }: TokenRowProps) 
         {formatCurrency(asset.volume24h, true)}
       </td>
 
-      {/* Sparkline */}
+      {/* Sparkline (7d) */}
       <td className="px-4 py-4 hidden xl:table-cell">{renderSparkline()}</td>
 
       {/* APY */}
       <td className="px-4 py-4 hidden lg:table-cell">
-        {asset.supplyApy && (
+        {asset.supplyApy != null && asset.supplyApy > 0 ? (
           <span className="text-success font-medium">
             {formatPercent(asset.supplyApy)}
           </span>
+        ) : (
+          <span className="text-muted-foreground text-sm">-</span>
         )}
       </td>
-    </motion.tr>
+    </tr>
   );
 }

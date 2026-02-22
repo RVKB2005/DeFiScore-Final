@@ -11,6 +11,11 @@ redis==5.0.1
 qrcode[pil]==7.4.2
 gunicorn==21.2.0
 requests==2.31.0
+httpx==0.26.0
 sqlalchemy==2.0.25
 psycopg2-binary==2.9.9
 alembic==1.13.1
+celery==5.3.4
+flower==2.0.1
+kombu==5.3.4
+poseidon-hash==0.1.4

@@ -24,6 +24,9 @@ class Settings(BaseSettings):
     ETHEREUM_SEPOLIA_RPC: str = "https://eth-sepolia.g.alchemy.com/v2/your-api-key"
     ETHEREUM_HOODI_RPC: str = "https://eth-hoodi.g.alchemy.com/v2/your-api-key"
     
+    # Archive Node RPC (Optional - for accurate historical balance snapshots)
+    ETHEREUM_ARCHIVE_RPC: Optional[str] = None
+    
     # Layer 2 - Arbitrum
     ARBITRUM_MAINNET_RPC: str = "https://arb-mainnet.g.alchemy.com/v2/your-api-key"
     ARBITRUM_SEPOLIA_RPC: str = "https://arb-sepolia.g.alchemy.com/v2/your-api-key"
@@ -131,6 +134,15 @@ class Settings(BaseSettings):
     
     # Database Configuration
     DATABASE_URL: str = "postgresql://user:password@localhost:5432/defiscore"
+    
+    # Etherscan API Configuration
+    ETHERSCAN_API_KEY: Optional[str] = None
+    
+    # The Graph Protocol API Configuration
+    GRAPH_API_KEY: Optional[str] = None
+    
+    # CoinGecko API Configuration (Price Oracle)
+    COINGECKO_API_KEY: Optional[str] = None
     
     # Application Configuration
     BASE_URL: str = "http://localhost:8000"
